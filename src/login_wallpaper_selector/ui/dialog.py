@@ -52,13 +52,13 @@ class WallpaperSelectorDialog:
             self.root = tk.Tk()
 
         self.root.title("Choose Your Wallpaper")
-        self.root.geometry("620x680")
-        self.root.minsize(580, 620)
+        self.root.geometry("640x740")
+        self.root.minsize(600, 700)
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
 
         # Center on screen
-        self._center_window(620, 680)
+        self._center_window(640, 740)
 
         self._build_widgets()
 
@@ -71,9 +71,43 @@ class WallpaperSelectorDialog:
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_widgets(self) -> None:
+        # Bottom Action Buttons ("Try Another", "Done / Close")
+        # Pack bottom frame FIRST so it is firmly anchored to the bottom edge and never clipped
+        bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        bottom_frame.pack(side="bottom", fill="x", padx=24, pady=(10, 20))
+
+        if HAS_CUSTOMTKINTER:
+            self.retry_btn = ctk.CTkButton(
+                bottom_frame,
+                text="🔄 Try Another",
+                width=140,
+                height=38,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                state="disabled",
+                fg_color="#4b5563",
+                hover_color="#374151",
+                command=self.on_retry,
+            )
+            self.retry_btn.pack(side="left")
+
+            self.close_btn = ctk.CTkButton(
+                bottom_frame,
+                text="Done / Close",
+                width=130,
+                height=38,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                command=self.on_close,
+            )
+            self.close_btn.pack(side="right")
+        else:
+            self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
+            self.retry_btn.pack(side="left")
+            self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
+            self.close_btn.pack(side="right")
+
         # Header container
         header_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        header_frame.pack(fill="x", padx=24, pady=(20, 10))
+        header_frame.pack(fill="x", padx=24, pady=(16, 8))
 
         title_lbl = (
             ctk.CTkLabel(
@@ -100,7 +134,7 @@ class WallpaperSelectorDialog:
 
         # Category buttons container (Grid of 5 options)
         btn_grid = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        btn_grid.pack(fill="x", padx=24, pady=10)
+        btn_grid.pack(fill="x", padx=24, pady=(6, 8))
 
         categories = [
             (WallpaperCategory.SPACE, "🚀 Space", "#1e3a8a"),
@@ -121,10 +155,10 @@ class WallpaperSelectorDialog:
                     btn_grid,
                     text=label_text,
                     font=ctk.CTkFont(size=14, weight="bold"),
-                    height=44,
+                    height=42,
                     command=lambda c=cat: self.on_select_category(c),
                 )
-                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=6, sticky="ew")
+                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=4, sticky="ew")
             else:
                 btn = tk.Button(
                     btn_grid,
@@ -133,7 +167,7 @@ class WallpaperSelectorDialog:
                     height=2,
                     command=lambda c=cat: self.on_select_category(c),
                 )
-                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=6, sticky="ew")
+                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=4, sticky="ew")
             self.cat_buttons[cat] = btn
 
         btn_grid.columnconfigure(0, weight=1)
@@ -166,7 +200,7 @@ class WallpaperSelectorDialog:
                 rb.pack(side="left", padx=5)
 
         # Preview Container
-        self.preview_frame = ctk.CTkFrame(self.root, height=190) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=190, bg="black")
+        self.preview_frame = ctk.CTkFrame(self.root, height=165) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=165, bg="black")
         self.preview_frame.pack(fill="x", padx=24, pady=8)
         self.preview_frame.pack_propagate(False)
 
@@ -202,42 +236,13 @@ class WallpaperSelectorDialog:
                 text="",
                 font=ctk.CTkFont(size=11),
                 text_color="gray",
-                wraplength=540,
+                wraplength=560,
                 justify="left",
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(self.root, text="", fg="gray", wraplength=540, justify="left")
+            else tk.Label(self.root, text="", fg="gray", wraplength=560, justify="left")
         )
         self.attrib_lbl.pack(anchor="w", padx=24, pady=(2, 6))
-
-        # Bottom Action Buttons ("Try Another", "Done / Close")
-        bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        bottom_frame.pack(fill="x", padx=24, pady=(6, 16), side="bottom")
-
-        if HAS_CUSTOMTKINTER:
-            self.retry_btn = ctk.CTkButton(
-                bottom_frame,
-                text="🔄 Try Another",
-                width=140,
-                state="disabled",
-                fg_color="#4b5563",
-                hover_color="#374151",
-                command=self.on_retry,
-            )
-            self.retry_btn.pack(side="left")
-
-            self.close_btn = ctk.CTkButton(
-                bottom_frame,
-                text="Done / Close",
-                width=120,
-                command=self.on_close,
-            )
-            self.close_btn.pack(side="right")
-        else:
-            self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
-            self.retry_btn.pack(side="left")
-            self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
-            self.close_btn.pack(side="right")
 
     def set_status(self, text: str, progress: Optional[float] = None) -> None:
         """Update status label and optional progress bar from any thread."""
@@ -364,8 +369,8 @@ class WallpaperSelectorDialog:
             if local_path.exists():
                 try:
                     img = Image.open(local_path)
-                    # Scale to fit preview box (approx 540x180) maintaining aspect ratio
-                    img.thumbnail((540, 180), Image.Resampling.LANCZOS)
+                    # Scale to fit preview box (approx 540x155) maintaining aspect ratio
+                    img.thumbnail((540, 155), Image.Resampling.LANCZOS)
                     if HAS_CUSTOMTKINTER:
                         ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
                         self.preview_label.configure(image=ctk_img, text="")
