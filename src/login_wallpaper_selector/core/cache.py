@@ -12,6 +12,7 @@ from PIL import Image
 
 from .config import AppConfig
 from .models import WallpaperCandidate, WallpaperMetadata, WallpaperPosition
+from .display import get_native_screen_resolution, render_wallpaper_for_screen
 
 
 class CacheManager:
@@ -82,15 +83,30 @@ class CacheManager:
         if not is_valid or width <= 0 or height <= 0:
             return None
 
-        # For Windows wallpaper compatibility, if WebP, convert a copy to PNG in cache
+        # Render local image to native screen resolution 1:1 in cache
         dest_filename = f"local_{source_path.stem}_{int(time.time())}"
-        if fmt.upper() in ("WEBP", "TIFF"):
-            target_file = self.cache_dir / f"{dest_filename}.png"
-            with Image.open(source_path) as img:
-                img.save(target_file, format="PNG")
+        target_file = self.cache_dir / f"{dest_filename}.jpg"
+        screen_w, screen_h = get_native_screen_resolution()
+
+        render_ok = render_wallpaper_for_screen(
+            source_path=source_path,
+            output_path=target_file,
+            target_width=screen_w,
+            target_height=screen_h,
+            mode=mode,
+        )
+
+        if not render_ok:
+            if fmt.upper() in ("WEBP", "TIFF"):
+                target_file = self.cache_dir / f"{dest_filename}.png"
+                with Image.open(source_path) as img:
+                    img.save(target_file, format="PNG")
+            else:
+                target_file = self.cache_dir / f"{dest_filename}{source_path.suffix.lower()}"
+                shutil.copy2(source_path, target_file)
+            final_w, final_h = width, height
         else:
-            target_file = self.cache_dir / f"{dest_filename}{source_path.suffix.lower()}"
-            shutil.copy2(source_path, target_file)
+            final_w, final_h = screen_w, screen_h
 
         sha256_hash = self.compute_sha256(target_file)
         metadata = WallpaperMetadata(
@@ -107,9 +123,9 @@ class CacheManager:
             license_url=None,
             attribution_required=False,
             attribution_text="",
-            width=width,
-            height=height,
-            aspect_ratio=width / height,
+            width=final_w,
+            height=final_h,
+            aspect_ratio=final_w / final_h,
             mode=mode,
         )
 
@@ -123,7 +139,7 @@ class CacheManager:
         temp_download_path: Path,
         mode: str = WallpaperPosition.FILL.value,
     ) -> Optional[WallpaperMetadata]:
-        """Validate a downloaded temp file and atomically commit it to cache."""
+        """Validate a downloaded temp file and atomically commit it to cache in native monitor resolution."""
         try:
             is_valid, width, height, fmt = self.validate_image_file(temp_download_path)
             if not is_valid:
@@ -135,23 +151,28 @@ class CacheManager:
             sha256_hash = self.compute_sha256(temp_download_path)
             clean_id = "".join(c for c in candidate.id if c.isalnum() or c in ("-", "_"))[:32]
             
-            # Extension resolution
-            ext = ".jpg"
-            if fmt.upper() == "PNG":
-                ext = ".png"
-            elif fmt.upper() == "WEBP":
-                # Convert WebP to PNG for wallpaper API compatibility
-                converted_temp = temp_download_path.with_suffix(".png.tmp")
-                with Image.open(temp_download_path) as img:
-                    img.save(converted_temp, format="PNG")
-                temp_download_path.unlink()
-                temp_download_path = converted_temp
-                ext = ".png"
+            screen_w, screen_h = get_native_screen_resolution()
+            final_path = self.cache_dir / f"{candidate.category.value.lower()}_{clean_id}_{sha256_hash[:8]}.jpg"
 
-            final_path = self.cache_dir / f"{candidate.category.value.lower()}_{clean_id}_{sha256_hash[:8]}{ext}"
+            # Render to exact 1:1 native monitor resolution
+            render_ok = render_wallpaper_for_screen(
+                source_path=temp_download_path,
+                output_path=final_path,
+                target_width=screen_w,
+                target_height=screen_h,
+                mode=mode,
+            )
 
-            # Atomically rename
-            temp_download_path.replace(final_path)
+            if render_ok:
+                final_w, final_h = screen_w, screen_h
+                if temp_download_path.exists():
+                    try:
+                        temp_download_path.unlink()
+                    except Exception:
+                        pass
+            else:
+                temp_download_path.replace(final_path)
+                final_w, final_h = width, height
 
             metadata = WallpaperMetadata(
                 image_id=candidate.id,
@@ -167,9 +188,9 @@ class CacheManager:
                 license_url=candidate.license_url,
                 attribution_required=candidate.attribution_required,
                 attribution_text=candidate.attribution_text,
-                width=width,
-                height=height,
-                aspect_ratio=width / height,
+                width=final_w,
+                height=final_h,
+                aspect_ratio=final_w / final_h,
                 mode=mode,
             )
 

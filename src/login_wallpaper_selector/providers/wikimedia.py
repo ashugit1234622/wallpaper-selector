@@ -9,6 +9,7 @@ import httpx
 from .base import BaseImageProvider
 from .license import LicenseValidator
 from ..core.models import WallpaperCategory, WallpaperCandidate, ImageDimensions
+from ..core.display import get_native_screen_resolution
 
 
 class WikimediaCommonsProvider(BaseImageProvider):
@@ -17,24 +18,25 @@ class WikimediaCommonsProvider(BaseImageProvider):
 
     CATEGORY_QUERIES = {
         WallpaperCategory.NATURE: [
-            "filetype:bitmap landscape nature mountains lake wallpaper -portrait -nudity -gore",
-            "filetype:bitmap scenic landscape forest river -portrait -nudity",
-            "filetype:bitmap national park landscape scenic -portrait",
             "incategory:Featured_pictures_of_landscapes -nudity",
+            "landscape nature mountains lake -portrait -nudity -gore",
+            "scenic landscape forest river -portrait -nudity",
+            "national park landscape scenic -portrait",
         ],
         WallpaperCategory.PORTRAIT: [
-            "filetype:bitmap historical portrait oil painting public domain -nude -nudity",
-            "filetype:bitmap renaissance portrait painting -nudity -nude",
             "incategory:Featured_pictures_of_people -nudity",
+            "historical portrait oil painting public domain -nude -nudity",
+            "renaissance portrait painting public domain -nude -nudity",
         ],
         WallpaperCategory.ART: [
-            "filetype:bitmap impressionism landscape painting -nude -nudity",
-            "filetype:bitmap classical landscape oil painting public domain -nude",
             "incategory:Featured_pictures_of_art -nudity",
+            "classical landscape oil painting public domain -nude",
+            "impressionism landscape painting public domain -nude -nudity",
         ],
         WallpaperCategory.SPACE: [
-            "filetype:bitmap deep space nebula telescope wallpaper -nudity",
             "incategory:Featured_pictures_of_astronomy -nudity",
+            "deep space nebula telescope wallpaper -nudity",
+            "hubble space telescope galaxy -nudity",
         ],
     }
 
@@ -113,13 +115,19 @@ class WikimediaCommonsProvider(BaseImageProvider):
                     if not url or mime not in ("image/jpeg", "image/png", "image/webp"):
                         continue
 
-                    # Filter for wallpaper quality
+                    # Filter for wallpaper quality matching native monitor resolution and format
+                    target_w, target_h = get_native_screen_resolution()
+                    target_ratio = target_w / target_h
                     dims = ImageDimensions(width=width, height=height)
+
                     if category == WallpaperCategory.PORTRAIT:
-                        if dims.width < 1200 or dims.height < 1000:
+                        if dims.width < int(target_w * 0.7) or dims.height < int(target_h * 0.8):
                             continue
                     else:
-                        if dims.width < 1600 or not dims.is_landscape:
+                        if dims.width < int(target_w * 0.85) or dims.height < int(target_h * 0.80):
+                            continue
+                        ratio_diff = abs(dims.aspect_ratio - target_ratio)
+                        if not dims.is_landscape or ratio_diff > 0.45:
                             continue
 
                     extmetadata = info.get("extmetadata", {})
@@ -164,6 +172,14 @@ class WikimediaCommonsProvider(BaseImageProvider):
                     )
                     candidates.append(candidate)
 
+        except Exception:
+            pass
+
+        # Prioritize candidates closest to monitor native aspect ratio
+        try:
+            target_w, target_h = get_native_screen_resolution()
+            target_ratio = target_w / target_h
+            candidates.sort(key=lambda c: abs(((c.width or target_w) / (c.height or target_h)) - target_ratio))
         except Exception:
             pass
 
