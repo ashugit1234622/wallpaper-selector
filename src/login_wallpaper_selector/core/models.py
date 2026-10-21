@@ -79,6 +79,14 @@ class WallpaperMetadata:
     mode: str  # "Fill" or "Fit"
     applied_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
+    @property
+    def dimensions(self) -> Dict[str, Any]:
+        return {
+            "width": self.width,
+            "height": self.height,
+            "aspect_ratio": round(self.aspect_ratio, 3),
+        }
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "image_id": self.image_id,

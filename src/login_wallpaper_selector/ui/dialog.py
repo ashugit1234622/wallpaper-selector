@@ -349,10 +349,10 @@ class WallpaperSelectorDialog:
         def _update():
             # Update attribution text
             attr_text = meta.attribution_text or f"{meta.title} ({meta.provider})"
-            if meta.license:
+            if getattr(meta, "license", None):
                 attr_text += f"\nLicense: {meta.license}"
-            if meta.dimensions.get("width"):
-                attr_text += f" | {meta.dimensions['width']}x{meta.dimensions['height']}"
+            if getattr(meta, "width", 0) and getattr(meta, "height", 0):
+                attr_text += f" | {meta.width}x{meta.height}"
 
             if HAS_CUSTOMTKINTER:
                 self.attrib_lbl.configure(text=attr_text)
