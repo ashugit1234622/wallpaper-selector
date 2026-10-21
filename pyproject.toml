@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "login-wallpaper-selector"
+version = "0.1.0"
+description = "A reliable desktop application that lets logged-in users choose a wallpaper category and automatically updates the desktop background."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Login Wallpaper Selector Team" }
+]
+dependencies = [
+    "httpx>=0.24.0",
+    "pillow>=9.0.0",
+    "platformdirs>=3.0.0",
+    "customtkinter>=5.2.0; platform_system=='Windows' or platform_system=='Linux' or platform_system=='Darwin'",
+    "pywin32>=305; platform_system=='Windows'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+]
+
+[project.scripts]
+login-wallpaper-selector = "login_wallpaper_selector.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

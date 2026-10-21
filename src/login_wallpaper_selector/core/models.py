@@ -1,0 +1,104 @@
+"""Data models and enums for Login Wallpaper Selector."""
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional, Dict, Any
+from datetime import datetime
+
+
+class WallpaperCategory(str, Enum):
+    SPACE = "Space"
+    NATURE = "Nature"
+    ART = "Art"
+    PORTRAIT = "Portrait"
+    LOCAL_STORAGE = "Local Storage"
+
+
+class WallpaperPosition(str, Enum):
+    FILL = "Fill"  # Scale proportionally, crop excess to cover screen (no distortion)
+    FIT = "Fit"    # Scale proportionally, letterbox/pillarbox to fit whole image (no distortion)
+
+
+@dataclass
+class ImageDimensions:
+    width: int
+    height: int
+
+    @property
+    def aspect_ratio(self) -> float:
+        if self.height <= 0:
+            return 0.0
+        return self.width / self.height
+
+    @property
+    def is_landscape(self) -> bool:
+        return self.aspect_ratio >= 1.25
+
+
+@dataclass
+class WallpaperCandidate:
+    """Represents a potential wallpaper discovered from a provider before download."""
+    id: str
+    category: WallpaperCategory
+    provider_name: str
+    title: str
+    download_url: str
+    source_url: str
+    creator: str = "Unknown"
+    license_name: str = "Unknown"
+    license_url: Optional[str] = None
+    attribution_required: bool = False
+    attribution_text: str = ""
+    preview_url: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    mime_type: Optional[str] = None
+    raw_metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class WallpaperMetadata:
+    """Metadata recorded when a wallpaper is successfully applied."""
+    image_id: str
+    category: str
+    provider: str
+    source_url: str
+    download_url: str
+    local_path: str
+    sha256: str
+    title: str
+    creator: str
+    license: str
+    license_url: Optional[str]
+    attribution_required: bool
+    attribution_text: str
+    width: int
+    height: int
+    aspect_ratio: float
+    mode: str  # "Fill" or "Fit"
+    applied_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "image_id": self.image_id,
+            "category": self.category,
+            "provider": self.provider,
+            "source_url": self.source_url,
+            "download_url": self.download_url,
+            "local_path": self.local_path,
+            "sha256": self.sha256,
+            "title": self.title,
+            "creator": self.creator,
+            "license": self.license,
+            "license_url": self.license_url,
+            "attribution_required": self.attribution_required,
+            "attribution_text": self.attribution_text,
+            "dimensions": {
+                "width": self.width,
+                "height": self.height,
+                "aspect_ratio": round(self.aspect_ratio, 3),
+            },
+            "applied_at": self.applied_at,
+            "mode": self.mode,
+        }
