@@ -30,12 +30,14 @@ class ProviderRouter:
         self.wikimedia = WikimediaCommonsProvider(timeout_seconds=config.request_timeout_seconds)
         self.artic = ArtInstituteChicagoProvider(timeout_seconds=config.request_timeout_seconds)
 
+    USER_AGENT = "LoginWallpaperSelector/1.0 (contact@mywallpaperapp.org)"
+
     def get_providers_for_category(self, category: WallpaperCategory) -> List[BaseImageProvider]:
         """Ordered list of providers (primary followed by fallbacks)."""
         if category == WallpaperCategory.SPACE:
             return [self.nasa, self.wikimedia]
         elif category == WallpaperCategory.ART:
-            return [self.artic, self.wikimedia]
+            return [self.wikimedia, self.artic]
         elif category in (WallpaperCategory.NATURE, WallpaperCategory.PORTRAIT):
             return [self.wikimedia]
         return []
@@ -84,7 +86,7 @@ class ProviderRouter:
     ) -> Optional[Path]:
         """Download candidate image streaming to a temporary .part file with verification."""
         temp_file = self.cache.cache_dir / f"download_{int(time.time()*1000)}.part"
-        headers = {"User-Agent": "LoginWallpaperSelector/1.0"}
+        headers = {"User-Agent": self.USER_AGENT}
 
         try:
             with httpx.Client(timeout=self.config.request_timeout_seconds * 2, headers=headers, follow_redirects=True) as client:

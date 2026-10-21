@@ -13,7 +13,7 @@ from ..core.models import WallpaperCategory, WallpaperCandidate, ImageDimensions
 
 class WikimediaCommonsProvider(BaseImageProvider):
     API_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
-    USER_AGENT = "LoginWallpaperSelector/1.0 (https://github.com/login-wallpaper-selector; app@example.com)"
+    USER_AGENT = "LoginWallpaperSelector/1.0 (contact@mywallpaperapp.org)"
 
     CATEGORY_QUERIES = {
         WallpaperCategory.NATURE: [
@@ -113,10 +113,14 @@ class WikimediaCommonsProvider(BaseImageProvider):
                     if not url or mime not in ("image/jpeg", "image/png", "image/webp"):
                         continue
 
-                    # Filter for landscape wallpaper quality
+                    # Filter for wallpaper quality
                     dims = ImageDimensions(width=width, height=height)
-                    if dims.width < 1600 or not dims.is_landscape:
-                        continue
+                    if category == WallpaperCategory.PORTRAIT:
+                        if dims.width < 1200 or dims.height < 1000:
+                            continue
+                    else:
+                        if dims.width < 1600 or not dims.is_landscape:
+                            continue
 
                     extmetadata = info.get("extmetadata", {})
                     lic_entry = extmetadata.get("LicenseShortName", {})
