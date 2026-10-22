@@ -11,6 +11,9 @@ from .base import BaseImageProvider
 from .nasa import NasaImageProvider
 from .wikimedia import WikimediaCommonsProvider
 from .artic import ArtInstituteChicagoProvider
+from .wallhaven import WallhavenProvider
+from .the_met import TheMetImageProvider
+from .bing import BingImageProvider
 from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
@@ -29,41 +32,57 @@ class ProviderRouter:
         self.nasa = NasaImageProvider(timeout_seconds=config.request_timeout_seconds)
         self.wikimedia = WikimediaCommonsProvider(timeout_seconds=config.request_timeout_seconds)
         self.artic = ArtInstituteChicagoProvider(timeout_seconds=config.request_timeout_seconds)
+        self.wallhaven = WallhavenProvider(timeout_seconds=config.request_timeout_seconds)
+        self.the_met = TheMetImageProvider(timeout_seconds=config.request_timeout_seconds)
+        self.bing = BingImageProvider(timeout_seconds=config.request_timeout_seconds)
 
     USER_AGENT = "LoginWallpaperSelector/1.0 (contact@mywallpaperapp.org)"
 
     def get_providers_for_category(self, category: WallpaperCategory) -> List[BaseImageProvider]:
-        """Ordered list of providers (primary followed by fallbacks)."""
+        """Ordered list of providers (primary followed by secondary and fallbacks)."""
         if category == WallpaperCategory.SPACE:
-            return [self.nasa, self.wikimedia]
+            return [self.nasa, self.wallhaven, self.bing, self.wikimedia]
+        elif category == WallpaperCategory.NATURE:
+            return [self.wallhaven, self.bing, self.wikimedia]
         elif category == WallpaperCategory.ART:
-            return [self.wikimedia, self.artic]
-        elif category in (WallpaperCategory.NATURE, WallpaperCategory.PORTRAIT):
-            return [self.wikimedia]
+            return [self.the_met, self.wallhaven, self.wikimedia, self.artic]
+        elif category == WallpaperCategory.PORTRAIT:
+            return [self.the_met, self.wallhaven, self.wikimedia]
         return []
 
     def fetch_candidates(self, category: WallpaperCategory, limit: int = 10) -> List[WallpaperCandidate]:
-        """Fetch candidate images for a category, trying primary and fallback providers."""
+        """Fetch candidate images for a category, interleaving results across available providers."""
         providers = self.get_providers_for_category(category)
+        if not providers:
+            return []
+
         exclude_ids = self.history.get_recent_ids()
         all_candidates: List[WallpaperCandidate] = []
+
+        # Interleave candidates from providers to ensure a diverse mix
+        provider_candidates: List[List[WallpaperCandidate]] = []
+        target_per_provider = max(3, (limit // len(providers)) + 2)
 
         for provider in providers:
             try:
                 candidates = provider.fetch_candidates(
                     category=category,
-                    limit=limit,
+                    limit=target_per_provider,
                     exclude_ids=exclude_ids,
                 )
                 if candidates:
-                    all_candidates.extend(candidates)
-                    if len(all_candidates) >= limit:
-                        break
+                    provider_candidates.append(candidates)
             except Exception:
                 continue
 
+        # Interleave candidates round-robin
+        while any(provider_candidates) and len(all_candidates) < limit:
+            for p_list in provider_candidates:
+                if p_list and len(all_candidates) < limit:
+                    all_candidates.append(p_list.pop(0))
+
         # If all candidates were excluded by history and list is empty, retry without history exclusion
-        if not all_candidates and providers:
+        if not all_candidates:
             for provider in providers:
                 try:
                     candidates = provider.fetch_candidates(
@@ -73,7 +92,8 @@ class ProviderRouter:
                     )
                     if candidates:
                         all_candidates.extend(candidates)
-                        break
+                        if len(all_candidates) >= limit:
+                            break
                 except Exception:
                     continue
 

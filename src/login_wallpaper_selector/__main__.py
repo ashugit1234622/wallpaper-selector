@@ -45,13 +45,16 @@ def run_check() -> int:
     router = ProviderRouter(config, history, cache)
 
     print("[*] Testing API connectivity...")
-    providers = [router.nasa, router.wikimedia, router.artic]
-    for prov in providers:
+    providers = [
+        (router.nasa, WallpaperCategory.SPACE),
+        (router.wallhaven, WallpaperCategory.NATURE),
+        (router.the_met, WallpaperCategory.ART),
+        (router.bing, WallpaperCategory.NATURE),
+        (router.wikimedia, WallpaperCategory.NATURE),
+        (router.artic, WallpaperCategory.ART),
+    ]
+    for prov, cat in providers:
         try:
-            # Query 1 item
-            cat = WallpaperCategory.SPACE if prov == router.nasa else (
-                WallpaperCategory.ART if prov == router.artic else WallpaperCategory.NATURE
-            )
             items = prov.fetch_candidates(cat, limit=1)
             if items:
                 print(f"    ✓ {prov.name}: Reachable ({len(items)} candidate found: '{items[0].title[:35]}...')")
@@ -59,7 +62,8 @@ def run_check() -> int:
                 print(f"    ⚠ {prov.name}: Query succeeded but returned 0 candidates.")
         except Exception as e:
             print(f"    ✗ {prov.name}: Failed to connect ({e})")
-            all_ok = False
+            if prov != router.artic:  # Artic is an optional fallback
+                all_ok = False
 
     print("\nHealth check complete.")
     return 0 if all_ok else 1

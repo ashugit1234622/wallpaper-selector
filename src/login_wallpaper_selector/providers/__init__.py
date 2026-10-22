@@ -4,6 +4,9 @@ from .license import LicenseValidator
 from .nasa import NasaImageProvider
 from .wikimedia import WikimediaCommonsProvider
 from .artic import ArtInstituteChicagoProvider
+from .wallhaven import WallhavenProvider
+from .the_met import TheMetImageProvider
+from .bing import BingImageProvider
 from .router import ProviderRouter
 
 __all__ = [
@@ -12,5 +15,8 @@ __all__ = [
     "NasaImageProvider",
     "WikimediaCommonsProvider",
     "ArtInstituteChicagoProvider",
+    "WallhavenProvider",
+    "TheMetImageProvider",
+    "BingImageProvider",
     "ProviderRouter",
 ]
