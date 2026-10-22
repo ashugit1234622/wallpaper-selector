@@ -80,7 +80,7 @@ class WallpaperSelectorDialog:
             self.retry_btn = ctk.CTkButton(
                 bottom_frame,
                 text="🔄 Try Another",
-                width=140,
+                width=120,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 state="disabled",
@@ -88,12 +88,38 @@ class WallpaperSelectorDialog:
                 hover_color="#374151",
                 command=self.on_retry,
             )
-            self.retry_btn.pack(side="left")
+            self.retry_btn.pack(side="left", padx=(0, 6))
+
+            self.save_btn = ctk.CTkButton(
+                bottom_frame,
+                text="💾 Save Image",
+                width=125,
+                height=38,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                state="disabled",
+                fg_color="#059669",
+                hover_color="#047857",
+                command=self.on_save_wallpaper,
+            )
+            self.save_btn.pack(side="left", padx=6)
+
+            self.open_folder_btn = ctk.CTkButton(
+                bottom_frame,
+                text="📂 Open Folder",
+                width=120,
+                height=38,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                state="disabled",
+                fg_color="#374151",
+                hover_color="#1f2937",
+                command=self.on_open_category_folder,
+            )
+            self.open_folder_btn.pack(side="left", padx=6)
 
             self.close_btn = ctk.CTkButton(
                 bottom_frame,
                 text="Done / Close",
-                width=130,
+                width=110,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 command=self.on_close,
@@ -101,7 +127,11 @@ class WallpaperSelectorDialog:
             self.close_btn.pack(side="right")
         else:
             self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
-            self.retry_btn.pack(side="left")
+            self.retry_btn.pack(side="left", padx=4)
+            self.save_btn = tk.Button(bottom_frame, text="💾 Save Image", state="disabled", command=self.on_save_wallpaper)
+            self.save_btn.pack(side="left", padx=4)
+            self.open_folder_btn = tk.Button(bottom_frame, text="📂 Open Folder", state="disabled", command=self.on_open_category_folder)
+            self.open_folder_btn.pack(side="left", padx=4)
             self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
             self.close_btn.pack(side="right")
 
@@ -193,11 +223,30 @@ class WallpaperSelectorDialog:
                 command=self.on_mode_change,
             )
             self.mode_selector.pack(side="left", padx=10, pady=8)
+
+            self.lockscreen_var = ctk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
+            self.lockscreen_chk = ctk.CTkCheckBox(
+                settings_frame,
+                text="Also set Lock Screen",
+                variable=self.lockscreen_var,
+                font=ctk.CTkFont(size=12),
+                command=self.on_lockscreen_toggle,
+            )
+            self.lockscreen_chk.pack(side="right", padx=12, pady=8)
         else:
             self.mode_var = tk.StringVar(value=self.config.default_position)
             for m in [WallpaperPosition.FILL.value, WallpaperPosition.FIT.value]:
                 rb = tk.Radiobutton(settings_frame, text=m, value=m, variable=self.mode_var, command=self.on_mode_change)
                 rb.pack(side="left", padx=5)
+
+            self.lockscreen_var = tk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
+            self.lockscreen_chk = tk.Checkbutton(
+                settings_frame,
+                text="Also set Lock Screen",
+                variable=self.lockscreen_var,
+                command=self.on_lockscreen_toggle,
+            )
+            self.lockscreen_chk.pack(side="right", padx=12, pady=8)
 
         # Preview Container
         self.preview_frame = ctk.CTkFrame(self.root, height=165) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=165, bg="black")
@@ -264,6 +313,9 @@ class WallpaperSelectorDialog:
             if self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
                 retry_state = "disabled" if busy else "normal"
                 self.retry_btn.configure(state=retry_state) if HAS_CUSTOMTKINTER else self.retry_btn.config(state=retry_state)
+            if self.current_metadata:
+                save_state = "disabled" if busy else "normal"
+                self.save_btn.configure(state=save_state) if HAS_CUSTOMTKINTER else self.save_btn.config(state=save_state)
         self.root.after(0, _update)
 
     def on_mode_change(self, *args) -> None:
@@ -274,6 +326,50 @@ class WallpaperSelectorDialog:
         if self.current_metadata and Path(self.current_metadata.local_path).exists():
             self.adapter.set_wallpaper(Path(self.current_metadata.local_path), mode=new_mode)
             self.set_status(f"Updated display mode to {new_mode}.")
+
+    def on_lockscreen_toggle(self) -> None:
+        enabled = self.lockscreen_var.get()
+        self.config.also_set_lockscreen = enabled
+        self.config.save()
+        # If active wallpaper exists and user checked box, apply to lock screen immediately
+        if enabled and self.current_metadata and Path(self.current_metadata.local_path).exists():
+            ok = self.adapter.set_lockscreen(Path(self.current_metadata.local_path))
+            if ok:
+                self.set_status("✓ Applied current wallpaper to Lock Screen.")
+
+    def on_save_wallpaper(self) -> None:
+        """Save the active wallpaper permanently to category's Saved folder."""
+        if not self.current_metadata:
+            return
+
+        saved_path, err = self.cache.save_wallpaper_to_category(self.current_metadata)
+        if saved_path:
+            self.saved_category_folder = saved_path.parent
+            if HAS_CUSTOMTKINTER:
+                self.save_btn.configure(text="✓ Saved!", state="disabled")
+                self.open_folder_btn.configure(state="normal")
+            else:
+                self.save_btn.config(text="✓ Saved!", state="disabled")
+                self.open_folder_btn.config(state="normal")
+            self.set_status(f"✓ Saved to {saved_path.parent.name}/{saved_path.name}")
+        else:
+            self.set_status(f"Could not save wallpaper: {err}")
+
+    def on_open_category_folder(self) -> None:
+        """Open the category's Saved directory in Windows File Explorer."""
+        folder = getattr(self, "saved_category_folder", None)
+        if not folder and self.current_metadata:
+            folder = self.cache.get_category_dir(self.current_metadata.category) / "Saved"
+            if not folder.exists():
+                folder = self.cache.get_category_dir(self.current_metadata.category)
+
+        if folder and folder.exists():
+            try:
+                import os
+                os.startfile(folder)
+            except Exception:
+                import subprocess
+                subprocess.Popen(["explorer", str(folder)])
 
     def on_select_category(self, category: WallpaperCategory) -> None:
         if self.is_busy:
@@ -291,7 +387,6 @@ class WallpaperSelectorDialog:
 
         if not selected_path:
             # User canceled the file picker
-            # "If the user cancels the file picker, close the dialog gracefully without changing the current wallpaper."
             self.root.destroy()
             return
 
@@ -304,8 +399,14 @@ class WallpaperSelectorDialog:
             if meta:
                 success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
                 if success:
+                    lock_msg = ""
+                    if self.lockscreen_var.get():
+                        lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                        if lock_ok:
+                            lock_msg = " & Lock Screen"
+
                     self.current_metadata = meta
-                    self.set_status(f"✓ Applied local wallpaper: {selected_path.name}", progress=1.0)
+                    self.set_status(f"✓ Applied local wallpaper{lock_msg}: {selected_path.name}", progress=1.0)
                     self._update_preview_and_attribution(meta)
                 else:
                     self.set_status("Failed to apply wallpaper through desktop adapter.")
@@ -340,8 +441,14 @@ class WallpaperSelectorDialog:
                 self.set_status("Applying wallpaper to desktop...", progress=0.95)
                 success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
                 if success:
+                    lock_msg = ""
+                    if self.lockscreen_var.get():
+                        lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                        if lock_ok:
+                            lock_msg = " & Lock Screen"
+
                     self.current_metadata = meta
-                    self.set_status(f"✓ Applied {category.value} wallpaper: {meta.title}", progress=1.0)
+                    self.set_status(f"✓ Applied {category.value} wallpaper{lock_msg}: {meta.title}", progress=1.0)
                     self._update_preview_and_attribution(meta)
                 else:
                     self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
@@ -360,6 +467,16 @@ class WallpaperSelectorDialog:
 
     def _update_preview_and_attribution(self, meta: WallpaperMetadata) -> None:
         def _update():
+            # Enable actions
+            if HAS_CUSTOMTKINTER:
+                self.retry_btn.configure(state="normal")
+                self.save_btn.configure(state="normal", text="💾 Save Image")
+                self.open_folder_btn.configure(state="disabled")
+            else:
+                self.retry_btn.config(state="normal")
+                self.save_btn.config(state="normal", text="💾 Save Image")
+                self.open_folder_btn.config(state="disabled")
+
             # Update attribution text
             attr_text = meta.attribution_text or f"{meta.title} ({meta.provider})"
             if getattr(meta, "license", None):

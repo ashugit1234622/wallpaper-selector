@@ -271,17 +271,59 @@ class CacheManager:
                     pass
         return total
 
+    def save_wallpaper_to_category(self, metadata: WallpaperMetadata) -> Tuple[Optional[Path], Optional[str]]:
+        """Explicitly save/preserve a wallpaper into its category's Saved folder.
+        
+        Returns:
+            Tuple of (saved_file_path, error_message)
+        """
+        if not metadata or not metadata.local_path:
+            return None, "No active wallpaper metadata found."
+
+        source_path = Path(metadata.local_path)
+        if not source_path.exists():
+            return None, f"Source wallpaper file not found on disk: {metadata.local_path}"
+
+        cat_dir = self.get_category_dir(metadata.category)
+        saved_dir = cat_dir / "Saved"
+        saved_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate clean human-readable filename
+        clean_title = "".join(c for c in metadata.title if c.isalnum() or c in (" ", "-", "_")).strip()
+        clean_title = clean_title.replace(" ", "_")[:50] or "wallpaper"
+        sha_suffix = metadata.sha256[:8] if getattr(metadata, "sha256", None) else str(int(time.time()))
+        dest_filename = f"{clean_title}_{sha_suffix}.jpg"
+        dest_path = saved_dir / dest_filename
+
+        try:
+            shutil.copy2(source_path, dest_path)
+
+            # Record in metadata store
+            if metadata.image_id in self._metadata_store:
+                self._metadata_store[metadata.image_id]["is_saved"] = True
+                self._metadata_store[metadata.image_id]["saved_path"] = str(dest_path.resolve())
+                self._save_metadata()
+
+            return dest_path, None
+        except Exception as e:
+            return None, str(e)
+
     def enforce_quota(self) -> None:
-        """Prune oldest cached files if cache size exceeds quota."""
+        """Prune oldest cached files if cache size exceeds quota (never prunes Saved/ folder)."""
         max_bytes = max(50, self.config.cache_quota_mb) * 1024 * 1024
         current_size = self.get_total_cache_size_bytes()
         if current_size <= max_bytes:
             return
 
-        # Find all cache image files across subfolders
+        # Find all cache image files across subfolders (excluding permanent files in Saved/)
         files = []
         for p in self.cache_dir.rglob("*"):
-            if p.is_file() and p.name not in ("metadata.json", "config.json", ".gitkeep") and not p.name.endswith(".part"):
+            if (
+                p.is_file()
+                and p.name not in ("metadata.json", "config.json", ".gitkeep")
+                and not p.name.endswith(".part")
+                and p.parent.name != "Saved"
+            ):
                 try:
                     files.append((p, p.stat().st_mtime, p.stat().st_size))
                 except OSError:

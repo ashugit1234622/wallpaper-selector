@@ -103,3 +103,47 @@ def test_cache_quota_enforcement(tmp_path):
     total_mb = cache.get_total_cache_size_bytes() / (1024 * 1024)
     # The cache enforces max(50, quota_mb) in production, but let's test quota calculation
     assert total_mb > 0
+
+
+def test_save_wallpaper_to_category(tmp_path):
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), cache_quota_mb=1)
+    cache = CacheManager(cfg)
+
+    # 1. Invalid metadata returns error
+    saved_path, err = cache.save_wallpaper_to_category(None)
+    assert saved_path is None
+    assert "No active wallpaper" in err
+
+    # 2. Valid candidate and save
+    temp_download = tmp_path / "download.part"
+    create_test_image(temp_download, width=1920, height=1080)
+
+    cand = WallpaperCandidate(
+        id="nature_preserve_1",
+        category=WallpaperCategory.NATURE,
+        provider_name="TestProvider",
+        title="Forest Waterfall & Sunrise",
+        download_url="https://example.com/waterfall.jpg",
+        source_url="https://example.com",
+    )
+
+    meta = cache.atomic_save_download(cand, temp_download)
+    assert meta is not None
+
+    # Save to category
+    saved_path, err = cache.save_wallpaper_to_category(meta)
+    assert err is None
+    assert saved_path is not None
+    assert saved_path.exists()
+    assert saved_path.parent.name == "Saved"
+    assert saved_path.parent.parent.name == "Nature"
+    assert "Forest_Waterfall" in saved_path.name
+
+    # Check metadata store updated
+    stored = cache._metadata_store[meta.image_id]
+    assert stored["is_saved"] is True
+    assert stored["saved_path"] == str(saved_path.resolve())
+
+    # 3. Quota enforcement never prunes Saved/ folder
+    cache.enforce_quota()
+    assert saved_path.exists()

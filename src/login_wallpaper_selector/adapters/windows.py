@@ -3,6 +3,7 @@
 from __future__ import annotations
 import os
 import sys
+import subprocess
 import winreg
 from pathlib import Path
 from typing import Optional
@@ -94,6 +95,38 @@ class WindowsWallpaperAdapter(BaseWallpaperAdapter):
 
         # 3. Fallback to SystemParametersInfoW
         return self._set_via_system_parameters_info(abs_path)
+
+    def set_lockscreen(self, image_path: Path) -> bool:
+        """Apply image file as the Windows Lock Screen wallpaper via WinRT."""
+        if not image_path.exists() or not image_path.is_file():
+            return False
+
+        abs_path = str(image_path.resolve())
+        ps_script = f"""
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Windows.System.UserProfile.LockScreen, Windows.System.UserProfile, ContentType=WindowsRuntime] | Out-Null
+[Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime] | Out-Null
+
+$asTaskOp = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+$asTaskAction = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' }})[0]
+
+$fileAsync = [Windows.Storage.StorageFile]::GetFileFromPathAsync('{abs_path}')
+$file = $asTaskOp.MakeGenericMethod([Windows.Storage.StorageFile]).Invoke($null, @($fileAsync)).GetAwaiter().GetResult()
+$action = [Windows.System.UserProfile.LockScreen]::SetImageFileAsync($file)
+$asTaskAction.Invoke($null, @($action)).GetAwaiter().GetResult()
+"""
+        try:
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-Command", ps_script,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+            return res.returncode == 0
+        except Exception:
+            return False
 
     def get_current_wallpaper(self) -> Optional[str]:
         try:

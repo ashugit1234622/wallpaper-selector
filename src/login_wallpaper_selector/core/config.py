@@ -22,6 +22,7 @@ class AppConfig:
     show_preview: bool = True
     custom_cache_dir: Optional[str] = None
     max_fetch_retries: int = 5
+    also_set_lockscreen: bool = False
 
     @classmethod
     def get_config_file_path(cls) -> Path:
@@ -62,6 +63,7 @@ class AppConfig:
                 show_preview=bool(data.get("show_preview", True)),
                 custom_cache_dir=data.get("custom_cache_dir"),
                 max_fetch_retries=int(data.get("max_fetch_retries", 5)),
+                also_set_lockscreen=bool(data.get("also_set_lockscreen", False)),
             )
         except Exception:
             return cls()

@@ -157,3 +157,59 @@ def test_retry_exhaustion_5_attempts(tmp_path, monkeypatch):
     assert 3 in attempts_seen
     assert 4 in attempts_seen
     assert 5 in attempts_seen
+
+
+def test_retry_dynamic_candidate_exclusion(tmp_path, monkeypatch):
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), max_fetch_retries=5)
+    hist = HistoryTracker(cfg)
+    cache = CacheManager(cfg)
+    router = ProviderRouter(cfg, hist, cache)
+
+    cand_bad = WallpaperCandidate(
+        id="bad_cand_id",
+        category=WallpaperCategory.PORTRAIT,
+        provider_name="MockProvider",
+        title="Bad Image",
+        download_url="https://example.com/bad.jpg",
+        source_url="https://example.com",
+    )
+    cand_good = WallpaperCandidate(
+        id="good_cand_id",
+        category=WallpaperCategory.PORTRAIT,
+        provider_name="MockProvider",
+        title="Good Portrait",
+        download_url="https://example.com/good.jpg",
+        source_url="https://example.com",
+    )
+
+    fetch_call_count = {"count": 0}
+    download_attempts = []
+
+    def mock_fetch(category, limit=6):
+        fetch_call_count["count"] += 1
+        if fetch_call_count["count"] == 1:
+            return [cand_bad]
+        # On attempt 2, provider returns both candidates
+        return [cand_bad, cand_good]
+
+    def mock_download(candidate, progress_callback=None):
+        download_attempts.append(candidate.id)
+        if candidate.id == "bad_cand_id":
+            return None
+        temp_img = tmp_path / "temp_good.jpg"
+        return create_mock_image(temp_img)
+
+    monkeypatch.setattr(router, "fetch_candidates", mock_fetch)
+    monkeypatch.setattr(router, "download_candidate", mock_download)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    meta, err = router.acquire_wallpaper_for_category(
+        WallpaperCategory.PORTRAIT,
+        mode="Fill",
+    )
+
+    assert meta is not None
+    assert meta.image_id == "good_cand_id"
+    # bad_cand_id should only have been attempted once in attempt 1, and excluded in attempt 2
+    assert download_attempts.count("bad_cand_id") == 1
+    assert download_attempts.count("good_cand_id") == 1

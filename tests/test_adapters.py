@@ -45,3 +45,45 @@ def test_windows_autostart_adapter_toggle():
             auto_adapter.enable(original_cmd)
         else:
             auto_adapter.disable()
+
+
+def test_windows_adapter_set_lockscreen(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    import subprocess
+    from login_wallpaper_selector.adapters.windows import WindowsWallpaperAdapter
+
+    adapter = WindowsWallpaperAdapter()
+
+    # Non-existent file returns False immediately
+    assert adapter.set_lockscreen(tmp_path / "non_existent.jpg") is False
+
+    # Create dummy image
+    test_img = tmp_path / "lock.jpg"
+    test_img.write_bytes(b"dummy image data")
+
+    # Mock successful PowerShell execution
+    mock_success = MagicMock(returncode=0)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_success)
+    assert adapter.set_lockscreen(test_img) is True
+
+    # Mock failed execution
+    mock_fail = MagicMock(returncode=1)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_fail)
+    assert adapter.set_lockscreen(test_img) is False
+
+
+def test_gnome_adapter_set_lockscreen(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    import subprocess
+    from login_wallpaper_selector.adapters.gnome import GnomeWallpaperAdapter
+
+    adapter = GnomeWallpaperAdapter()
+
+    assert adapter.set_lockscreen(tmp_path / "non_existent.jpg") is False
+
+    test_img = tmp_path / "lock.jpg"
+    test_img.write_bytes(b"dummy image data")
+
+    mock_run = MagicMock(returncode=0)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_run)
+    assert adapter.set_lockscreen(test_img) is True

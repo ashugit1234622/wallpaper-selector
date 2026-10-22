@@ -13,11 +13,11 @@ build/
 .venv
 
 # Ignore downloaded wallpapers and metadata, but keep category folder structure
-wallpapers/*/*.jpg
-wallpapers/*/*.jpeg
-wallpapers/*/*.png
-wallpapers/*/*.webp
+wallpapers/**/*.jpg
+wallpapers/**/*.jpeg
+wallpapers/**/*.png
+wallpapers/**/*.webp
+wallpapers/**/*.part
+wallpapers/**/*.tmp
 wallpapers/metadata.json
-wallpapers/*.part
-wallpapers/*.tmp
-!wallpapers/*/.gitkeep
+!wallpapers/**/.gitkeep

@@ -132,7 +132,7 @@ def deregister_autostart() -> int:
         return 1
 
 
-def set_category_headless(category_str: str, mode: Optional[str] = None) -> int:
+def set_category_headless(category_str: str, mode: Optional[str] = None, also_lockscreen: bool = False) -> int:
     """Directly fetch and apply a category wallpaper headlessly."""
     category = None
     for c in WallpaperCategory:
@@ -167,7 +167,13 @@ def set_category_headless(category_str: str, mode: Optional[str] = None) -> int:
 
     success = adapter.set_wallpaper(Path(meta.local_path), mode=pos_mode)
     if success:
-        print(f"✓ Successfully applied '{meta.title}' ({meta.creator})")
+        lock_msg = ""
+        if also_lockscreen or config.also_set_lockscreen:
+            lock_ok = adapter.set_lockscreen(Path(meta.local_path))
+            if lock_ok:
+                lock_msg = " & Lock Screen"
+
+        print(f"✓ Successfully applied '{meta.title}' ({meta.creator}){lock_msg}")
         print(f"  License: {meta.license}")
         print(f"  Saved to: {meta.local_path}")
         return 0
@@ -202,6 +208,7 @@ def main() -> None:
     parser.add_argument("--uninstall", action="store_true", help="Deregister login autostart")
     parser.add_argument("--set-category", type=str, help="Headlessly fetch and apply a category (Space, Nature, Art, Portrait)")
     parser.add_argument("--mode", type=str, choices=["Fill", "Fit"], help="Display mode (Fill or Fit)")
+    parser.add_argument("--set-lockscreen", action="store_true", help="Also apply the fetched wallpaper to system lock screen")
 
     args = parser.parse_args()
 
@@ -215,7 +222,7 @@ def main() -> None:
     elif args.uninstall:
         sys.exit(deregister_autostart())
     elif args.set_category:
-        sys.exit(set_category_headless(args.set_category, args.mode))
+        sys.exit(set_category_headless(args.set_category, args.mode, args.set_lockscreen))
     else:
         # Default action: launch GUI dialog
         launch_gui(is_login=args.on_login)

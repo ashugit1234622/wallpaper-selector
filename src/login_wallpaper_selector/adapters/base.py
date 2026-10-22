@@ -24,3 +24,7 @@ class BaseWallpaperAdapter(ABC):
     def get_current_wallpaper(self) -> Optional[str]:
         """Retrieve path to currently applied wallpaper if accessible."""
         pass
+
+    def set_lockscreen(self, image_path: Path) -> bool:
+        """Optional: Apply the specified image file as system lockscreen wallpaper."""
+        return False

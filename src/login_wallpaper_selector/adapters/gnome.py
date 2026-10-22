@@ -42,6 +42,20 @@ class GnomeWallpaperAdapter(BaseWallpaperAdapter):
         except Exception:
             return False
 
+    def set_lockscreen(self, image_path: Path) -> bool:
+        if not image_path.exists() or not image_path.is_file():
+            return False
+        uri = image_path.resolve().as_uri()
+        try:
+            subprocess.run(
+                ["gsettings", "set", "org.gnome.desktop.screensaver", "picture-uri", uri],
+                check=True,
+                capture_output=True,
+            )
+            return True
+        except Exception:
+            return False
+
     def get_current_wallpaper(self) -> Optional[str]:
         try:
             res = subprocess.run(
