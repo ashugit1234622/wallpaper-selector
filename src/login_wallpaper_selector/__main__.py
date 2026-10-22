@@ -132,6 +132,45 @@ def deregister_autostart() -> int:
         return 1
 
 
+def create_desktop_shortcut() -> int:
+    """Create a Windows desktop shortcut with custom icon."""
+    if sys.platform != "win32":
+        print("Desktop shortcut creation is currently supported on Windows.")
+        return 1
+
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("WScript.Shell")
+        desktop = shell.SpecialFolders("Desktop")
+        shortcut_path = Path(desktop) / "Login Wallpaper Selector.lnk"
+
+        project_root = Path(__file__).resolve().parents[2]
+        pythonw = Path(sys.executable).parent / "pythonw.exe"
+        target = str(pythonw) if pythonw.exists() else sys.executable
+
+        shortcut = shell.CreateShortcut(str(shortcut_path))
+        shortcut.TargetPath = target
+        shortcut.Arguments = "-m login_wallpaper_selector"
+        shortcut.WorkingDirectory = str(project_root)
+
+        icon_path = project_root / "assets" / "icon.ico"
+        if icon_path.exists():
+            shortcut.IconLocation = str(icon_path)
+
+        shortcut.Description = "Login Wallpaper Selector - Switch and save desktop & lock screen wallpapers"
+        shortcut.Save()
+
+        print("✓ Created desktop shortcut:")
+        print(f"  Location: {shortcut_path}")
+        print(f"  Target: {target} -m login_wallpaper_selector")
+        if icon_path.exists():
+            print(f"  Icon: {icon_path}")
+        return 0
+    except Exception as e:
+        print(f"✗ Failed to create desktop shortcut: {e}")
+        return 1
+
+
 def set_category_headless(category_str: str, mode: Optional[str] = None, also_lockscreen: bool = False) -> int:
     """Directly fetch and apply a category wallpaper headlessly."""
     category = None
@@ -209,6 +248,7 @@ def main() -> None:
     parser.add_argument("--set-category", type=str, help="Headlessly fetch and apply a category (Space, Nature, Art, Portrait)")
     parser.add_argument("--mode", type=str, choices=["Fill", "Fit"], help="Display mode (Fill or Fit)")
     parser.add_argument("--set-lockscreen", action="store_true", help="Also apply the fetched wallpaper to system lock screen")
+    parser.add_argument("--create-shortcut", action="store_true", help="Create a desktop shortcut with custom icon to run the app")
 
     args = parser.parse_args()
 
@@ -221,6 +261,8 @@ def main() -> None:
         sys.exit(register_autostart())
     elif args.uninstall:
         sys.exit(deregister_autostart())
+    elif args.create_shortcut:
+        sys.exit(create_desktop_shortcut())
     elif args.set_category:
         sys.exit(set_category_headless(args.set_category, args.mode, args.set_lockscreen))
     else:

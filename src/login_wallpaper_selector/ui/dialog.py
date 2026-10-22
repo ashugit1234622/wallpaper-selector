@@ -57,6 +57,14 @@ class WallpaperSelectorDialog:
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
 
+        # Set window icon if available
+        icon_path = Path(__file__).resolve().parents[3] / "assets" / "icon.ico"
+        if icon_path.exists():
+            try:
+                self.root.iconbitmap(str(icon_path))
+            except Exception:
+                pass
+
         # Center on screen
         self._center_window(640, 740)
 

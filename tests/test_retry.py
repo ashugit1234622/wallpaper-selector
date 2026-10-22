@@ -196,7 +196,7 @@ def test_retry_dynamic_candidate_exclusion(tmp_path, monkeypatch):
         download_attempts.append(candidate.id)
         if candidate.id == "bad_cand_id":
             return None
-        temp_img = tmp_path / "temp_good.jpg"
+        temp_img = tmp_path / f"temp_{candidate.id}.jpg"
         return create_mock_image(temp_img)
 
     monkeypatch.setattr(router, "fetch_candidates", mock_fetch)
