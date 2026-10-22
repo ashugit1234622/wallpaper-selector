@@ -153,7 +153,14 @@ def set_category_headless(category_str: str, mode: Optional[str] = None) -> int:
     pos_mode = mode or config.default_position
     print(f"Acquiring {category.value} wallpaper (Mode: {pos_mode})...")
 
-    meta, err = router.acquire_wallpaper_for_category(category, mode=pos_mode)
+    def _cli_status(msg: str, attempt: int, total_attempts: int):
+        print(f"  [{attempt}/{total_attempts}] {msg}")
+
+    meta, err = router.acquire_wallpaper_for_category(
+        category,
+        mode=pos_mode,
+        status_callback=_cli_status,
+    )
     if not meta:
         print(f"Failed to acquire wallpaper: {err}")
         return 1

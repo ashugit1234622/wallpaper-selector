@@ -21,6 +21,7 @@ class AppConfig:
     theme: str = "System"  # "System", "Dark", "Light"
     show_preview: bool = True
     custom_cache_dir: Optional[str] = None
+    max_fetch_retries: int = 5
 
     @classmethod
     def get_config_file_path(cls) -> Path:
@@ -60,6 +61,7 @@ class AppConfig:
                 theme=data.get("theme", "System"),
                 show_preview=bool(data.get("show_preview", True)),
                 custom_cache_dir=data.get("custom_cache_dir"),
+                max_fetch_retries=int(data.get("max_fetch_retries", 5)),
             )
         except Exception:
             return cls()

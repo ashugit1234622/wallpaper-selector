@@ -57,7 +57,26 @@ def test_atomic_save_download(tmp_path):
     assert metadata.width > 0
     assert metadata.height > 0
     assert Path(metadata.local_path).exists()
+    assert "Space" in metadata.local_path
     assert not temp_download.exists()  # Temp file was processed into cache
+
+
+def test_category_subfolders(tmp_path):
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"))
+    cache = CacheManager(cfg)
+
+    # Check that category directory is created
+    space_dir = cache.get_category_dir(WallpaperCategory.SPACE)
+    assert space_dir.exists()
+    assert space_dir.name == "Space"
+
+    nature_dir = cache.get_category_dir(WallpaperCategory.NATURE)
+    assert nature_dir.exists()
+    assert nature_dir.name == "Nature"
+
+    local_dir = cache.get_category_dir(WallpaperCategory.LOCAL_STORAGE)
+    assert local_dir.exists()
+    assert local_dir.name == "Local_Storage"
 
 
 def test_cache_quota_enforcement(tmp_path):

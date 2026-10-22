@@ -11,7 +11,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from PIL import Image
 
 from .config import AppConfig
-from .models import WallpaperCandidate, WallpaperMetadata, WallpaperPosition
+from .models import WallpaperCandidate, WallpaperMetadata, WallpaperPosition, WallpaperCategory
 from .display import get_native_screen_resolution, render_wallpaper_for_screen
 
 
@@ -23,10 +23,24 @@ class CacheManager:
         if config.custom_cache_dir:
             self.cache_dir = Path(config.custom_cache_dir)
         else:
-            self.cache_dir = AppConfig.get_default_cache_dir()
+            # Prefer project root 'wallpapers' directory if it exists
+            project_wallpapers = Path(__file__).resolve().parents[3] / "wallpapers"
+            if project_wallpapers.exists() and project_wallpapers.is_dir():
+                self.cache_dir = project_wallpapers
+            else:
+                self.cache_dir = AppConfig.get_default_cache_dir()
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_file = self.cache_dir / "metadata.json"
         self._metadata_store: Dict[str, Dict[str, Any]] = self._load_metadata()
+
+    def get_category_dir(self, category: Any) -> Path:
+        """Return and ensure category-specific subfolder."""
+        cat_name = category.value if hasattr(category, "value") else str(category)
+        safe_name = cat_name.replace(" ", "_")
+        cat_dir = self.cache_dir / safe_name
+        cat_dir.mkdir(parents=True, exist_ok=True)
+        return cat_dir
 
     def _load_metadata(self) -> Dict[str, Dict[str, Any]]:
         if not self.metadata_file.exists():
@@ -83,9 +97,9 @@ class CacheManager:
         if not is_valid or width <= 0 or height <= 0:
             return None
 
-        # Render local image to native screen resolution 1:1 in cache
+        category_dir = self.get_category_dir(WallpaperCategory.LOCAL_STORAGE)
         dest_filename = f"local_{source_path.stem}_{int(time.time())}"
-        target_file = self.cache_dir / f"{dest_filename}.jpg"
+        target_file = category_dir / f"{dest_filename}.jpg"
         screen_w, screen_h = get_native_screen_resolution()
 
         render_ok = render_wallpaper_for_screen(
@@ -98,11 +112,11 @@ class CacheManager:
 
         if not render_ok:
             if fmt.upper() in ("WEBP", "TIFF"):
-                target_file = self.cache_dir / f"{dest_filename}.png"
+                target_file = category_dir / f"{dest_filename}.png"
                 with Image.open(source_path) as img:
                     img.save(target_file, format="PNG")
             else:
-                target_file = self.cache_dir / f"{dest_filename}{source_path.suffix.lower()}"
+                target_file = category_dir / f"{dest_filename}{source_path.suffix.lower()}"
                 shutil.copy2(source_path, target_file)
             final_w, final_h = width, height
         else:
@@ -152,7 +166,8 @@ class CacheManager:
             clean_id = "".join(c for c in candidate.id if c.isalnum() or c in ("-", "_"))[:32]
             
             screen_w, screen_h = get_native_screen_resolution()
-            final_path = self.cache_dir / f"{candidate.category.value.lower()}_{clean_id}_{sha256_hash[:8]}.jpg"
+            category_dir = self.get_category_dir(candidate.category)
+            final_path = category_dir / f"{clean_id}_{sha256_hash[:8]}.jpg"
 
             # Render to exact 1:1 native monitor resolution
             render_ok = render_wallpaper_for_screen(
@@ -197,6 +212,7 @@ class CacheManager:
             self._record_metadata(metadata)
             self.enforce_quota()
             return metadata
+
         except Exception:
             if temp_download_path.exists():
                 try:
@@ -236,12 +252,19 @@ class CacheManager:
                     valid, _, _, _ = self.validate_image_file(p)
                     if valid:
                         return p
+
+        # Fallback search across category subfolders
+        for p in self.cache_dir.rglob("*.jpg"):
+            if p.is_file():
+                valid, _, _, _ = self.validate_image_file(p)
+                if valid:
+                    return p
         return None
 
     def get_total_cache_size_bytes(self) -> int:
         total = 0
-        for entry in self.cache_dir.iterdir():
-            if entry.is_file():
+        for entry in self.cache_dir.rglob("*"):
+            if entry.is_file() and entry.name != "metadata.json":
                 try:
                     total += entry.stat().st_size
                 except OSError:
@@ -255,10 +278,10 @@ class CacheManager:
         if current_size <= max_bytes:
             return
 
-        # Find all cache image files
+        # Find all cache image files across subfolders
         files = []
-        for p in self.cache_dir.iterdir():
-            if p.is_file() and p.name not in ("metadata.json", "config.json"):
+        for p in self.cache_dir.rglob("*"):
+            if p.is_file() and p.name not in ("metadata.json", "config.json", ".gitkeep") and not p.name.endswith(".part"):
                 try:
                     files.append((p, p.stat().st_mtime, p.stat().st_size))
                 except OSError:

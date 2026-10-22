@@ -11,3 +11,13 @@ build/
 *.tmp
 .env
 .venv
+
+# Ignore downloaded wallpapers and metadata, but keep category folder structure
+wallpapers/*/*.jpg
+wallpapers/*/*.jpeg
+wallpapers/*/*.png
+wallpapers/*/*.webp
+wallpapers/metadata.json
+wallpapers/*.part
+wallpapers/*.tmp
+!wallpapers/*/.gitkeep

@@ -317,7 +317,7 @@ class WallpaperSelectorDialog:
 
     def _handle_online_category(self, category: WallpaperCategory) -> None:
         self.set_busy(True)
-        self.set_status(f"Searching for {category.value} wallpaper...", progress=0.1)
+        self.set_status(f"Searching for {category.value} wallpaper...", progress=0.05)
 
         def _worker():
             def _progress(downloaded: int, total: int):
@@ -325,8 +325,16 @@ class WallpaperSelectorDialog:
                 kb = downloaded // 1024
                 self.set_status(f"Downloading {category.value} ({kb} KB)...", progress=frac)
 
+            def _status(msg: str, attempt: int, total_attempts: int):
+                self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
+
             mode = self.mode_var.get()
-            meta, err = self.router.acquire_wallpaper_for_category(category, mode=mode, progress_callback=_progress)
+            meta, err = self.router.acquire_wallpaper_for_category(
+                category,
+                mode=mode,
+                progress_callback=_progress,
+                status_callback=_status,
+            )
 
             if meta:
                 self.set_status("Applying wallpaper to desktop...", progress=0.95)

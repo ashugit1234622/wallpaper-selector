@@ -139,31 +139,62 @@ class ProviderRouter:
         category: WallpaperCategory,
         mode: str,
         progress_callback: Optional[callable] = None,
+        status_callback: Optional[callable] = None,
+        max_retries: Optional[int] = None,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
-        """Fetch, download, validate, cache, and record a wallpaper for an online category.
+        """Fetch, download, validate, cache, and record a wallpaper for an online category with retries.
         
+        Tries at least 5 times across available repositories until a successful image is fetched.
+
         Returns:
             Tuple of (WallpaperMetadata, error_message)
         """
-        candidates = self.fetch_candidates(category, limit=8)
-        if not candidates:
-            return None, "No online images could be found or network is unreachable."
+        total_attempts = max(5, max_retries or getattr(self.config, "max_fetch_retries", 5))
+        accumulated_excludes = set(self.history.get_recent_ids())
 
-        random.shuffle(candidates)
+        for attempt in range(1, total_attempts + 1):
+            if status_callback:
+                status_callback(
+                    f"Attempt {attempt}/{total_attempts}: Finding {category.value} wallpaper...",
+                    attempt,
+                    total_attempts,
+                )
 
-        for candidate in candidates:
-            temp_path = self.download_candidate(candidate, progress_callback)
-            if not temp_path:
-                continue
+            candidates = self.fetch_candidates(category, limit=6)
+            # Filter out any candidates that already failed in previous attempts
+            valid_candidates = [c for c in candidates if c.id not in accumulated_excludes]
 
-            metadata = self.cache.atomic_save_download(
-                candidate=candidate,
-                temp_download_path=temp_path,
-                mode=mode,
-            )
+            if not valid_candidates:
+                # If all were excluded, retry fresh batch
+                valid_candidates = candidates
 
-            if metadata:
-                self.history.record(candidate.id)
-                return metadata, None
+            if valid_candidates:
+                random.shuffle(valid_candidates)
+                for candidate in valid_candidates:
+                    temp_path = self.download_candidate(candidate, progress_callback)
+                    if not temp_path:
+                        accumulated_excludes.add(candidate.id)
+                        continue
 
-        return None, "Downloaded images failed format or integrity verification."
+                    metadata = self.cache.atomic_save_download(
+                        candidate=candidate,
+                        temp_download_path=temp_path,
+                        mode=mode,
+                    )
+
+                    if metadata:
+                        self.history.record(candidate.id)
+                        return metadata, None
+                    else:
+                        accumulated_excludes.add(candidate.id)
+
+            if attempt < total_attempts:
+                if status_callback:
+                    status_callback(
+                        f"Attempt {attempt}/{total_attempts} failed. Retrying in 1s...",
+                        attempt,
+                        total_attempts,
+                    )
+                time.sleep(1.0)
+
+        return None, f"Failed to acquire {category.value} wallpaper after {total_attempts} attempts."
