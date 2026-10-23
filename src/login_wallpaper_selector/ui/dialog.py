@@ -36,9 +36,16 @@ from .update_dialog import UpdateModalDialog
 class WallpaperSelectorDialog:
     """Desktop dialog displaying the wallpaper options with live preview and controls."""
 
-    def __init__(self, config: Optional[AppConfig] = None):
+    def __init__(
+        self,
+        config: Optional[AppConfig] = None,
+        parent_frame: Optional[Any] = None,
+        root_window: Optional[Any] = None,
+    ):
         self.config = config or AppConfig.load()
         self.config.default_position = WallpaperPosition.FILL.value
+        self.parent_frame = parent_frame
+        self.root = root_window
         self.history = HistoryTracker(self.config)
         self.cache = CacheManager(self.config)
         self.favorites_mgr = FavoritesManager(self.config)
@@ -58,10 +65,19 @@ class WallpaperSelectorDialog:
 
         self._init_window()
 
-        if getattr(self.config, "check_for_updates_on_startup", True) and hasattr(self, "root") and self.root:
+        if not self.parent_frame and getattr(self.config, "check_for_updates_on_startup", True) and hasattr(self, "root") and self.root:
             self.root.after(1500, self._check_for_updates_startup)
 
     def _init_window(self) -> None:
+        if self.parent_frame is not None:
+            if not self.root:
+                try:
+                    self.root = self.parent_frame.winfo_toplevel()
+                except Exception:
+                    self.root = None
+            self._build_widgets()
+            return
+
         if HAS_CUSTOMTKINTER:
             ctk.set_appearance_mode(self.config.theme)
             ctk.set_default_color_theme("blue")
@@ -127,8 +143,10 @@ class WallpaperSelectorDialog:
                     pass
 
     def _build_widgets(self) -> None:
+        host_target = self.parent_frame if self.parent_frame is not None else self.root
+
         # Bottom Action Bar: permanently docked at bottom edge of root so actions are ALWAYS accessible
-        bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        bottom_frame = ctk.CTkFrame(host_target, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(host_target)
         bottom_frame.pack(side="bottom", fill="x", padx=16, pady=(6, 12))
 
         # Responsive 5-column grid for action buttons - stretches evenly across any width without collision
@@ -209,12 +227,12 @@ class WallpaperSelectorDialog:
 
         # Scrollable container for the main content area so nothing is EVER clipped or crammed on any screen size
         if HAS_CUSTOMTKINTER:
-            self.scroll_container = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
+            self.scroll_container = ctk.CTkScrollableFrame(host_target, fg_color="transparent")
             self.scroll_container.pack(fill="both", expand=True, padx=4, pady=(4, 0))
             main_parent = self.scroll_container
         else:
-            canvas = tk.Canvas(self.root, borderwidth=0, highlightthickness=0)
-            scrollbar = tk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+            canvas = tk.Canvas(host_target, borderwidth=0, highlightthickness=0)
+            scrollbar = tk.Scrollbar(host_target, orient="vertical", command=canvas.yview)
             self.scrollable_inner_frame = tk.Frame(canvas)
             self.scrollable_inner_frame.bind(
                 "<Configure>",
@@ -1478,8 +1496,18 @@ class WallpaperSelectorDialog:
         threading.Thread(target=_worker, daemon=True).start()
 
     def on_close(self) -> None:
-        self.root.destroy()
+        if self.parent_frame is not None:
+            # Embedded in suite shell: close toplevel if present
+            if hasattr(self, "root") and self.root:
+                try:
+                    self.root.destroy()
+                except Exception:
+                    pass
+            return
+        if hasattr(self, "root") and self.root:
+            self.root.destroy()
 
     def run(self) -> None:
         """Run the main GUI loop."""
-        self.root.mainloop()
+        if hasattr(self, "root") and self.root:
+            self.root.mainloop()

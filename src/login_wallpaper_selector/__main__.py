@@ -338,9 +338,9 @@ def run_update() -> int:
         return 1
 
 
-def launch_gui(is_login: bool = False) -> None:
-    """Launch the graphical selection dialog."""
-    print("=== Login Wallpaper Selector ===", flush=True)
+def launch_gui(is_login: bool = False, initial_tool: str = "wallpaper") -> None:
+    """Launch the graphical desktop utility suite."""
+    print("=== Desktop Utility Suite ===", flush=True)
     config = AppConfig.load()
 
     if is_login:
@@ -349,18 +349,21 @@ def launch_gui(is_login: bool = False) -> None:
         detector = SessionDetector(stabilization_delay_seconds=config.session_delay_seconds)
         detector.wait_until_ready(log_fn=print)
 
-    print("[*] Opening wallpaper selector GUI. Logs will appear below as you interact with the app...", flush=True)
-    from .ui.dialog import WallpaperSelectorDialog
-    dialog = WallpaperSelectorDialog(config)
-    dialog.run()
+    print("[*] Opening Desktop Utility Suite GUI. Logs will appear below as you interact with the app...", flush=True)
+    from .ui.shell import AppShell
+    shell = AppShell(config)
+    if initial_tool and initial_tool != "wallpaper":
+        shell.switch_tool(initial_tool)
+    shell.run()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="login-wallpaper-selector",
-        description="Desktop application that prompts user to select a wallpaper category upon login.",
+        description="Desktop utility suite featuring Wallpaper Selector and Download Folder Organizer.",
     )
     parser.add_argument("--on-login", action="store_true", help="Launch triggered by desktop login (waits for session ready)")
+    parser.add_argument("--organizer", action="store_true", help="Launch directly into the Download Folder Organizer tool")
     parser.add_argument("--check", action="store_true", help="Run system health check on APIs, adapters, and autostart")
     parser.add_argument("--status", action="store_true", help="Show current application status and metadata")
     parser.add_argument("--install", action="store_true", help="Register current-user login autostart")
@@ -414,7 +417,8 @@ def main() -> None:
         sys.exit(set_category_headless(cat_to_use, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware, keyword_str=args.keyword))
     else:
         # Default action: launch GUI dialog
-        launch_gui(is_login=args.on_login)
+        initial = "organizer" if args.organizer else "wallpaper"
+        launch_gui(is_login=args.on_login, initial_tool=initial)
 
 
 if __name__ == "__main__":

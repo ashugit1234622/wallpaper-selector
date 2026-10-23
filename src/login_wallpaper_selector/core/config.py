@@ -36,6 +36,12 @@ class AppConfig:
     last_update_check_timestamp: Optional[str] = None
     update_check_interval_hours: int = 4
 
+    organizer_last_folder: Optional[str] = None
+    organizer_mode: str = "by_type"  # "by_type", "by_date", "by_type_and_date"
+    organizer_destination: Optional[str] = None
+    organizer_recursive: bool = False
+    organizer_conflict_policy: str = "keep_both"  # "keep_both", "skip"
+
     @classmethod
     def get_config_file_path(cls) -> Path:
         base_dir = Path(user_config_dir("LoginWallpaperSelector", appauthor=False))
@@ -65,26 +71,10 @@ class AppConfig:
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return cls(
-                default_position=data.get("default_position", WallpaperPosition.FILL.value),
-                cache_quota_mb=int(data.get("cache_quota_mb", 500)),
-                session_delay_seconds=int(data.get("session_delay_seconds", 3)),
-                request_timeout_seconds=int(data.get("request_timeout_seconds", 12)),
-                history_limit=int(data.get("history_limit", 50)),
-                theme=data.get("theme", "System"),
-                show_preview=bool(data.get("show_preview", True)),
-                custom_cache_dir=data.get("custom_cache_dir"),
-                max_fetch_retries=int(data.get("max_fetch_retries", 5)),
-                also_set_lockscreen=bool(data.get("also_set_lockscreen", False)),
-                anti_repetition_days=int(data.get("anti_repetition_days", 14)),
-                anti_repetition_enabled=bool(data.get("anti_repetition_enabled", True)),
-                desktop_layout_awareness=bool(data.get("desktop_layout_awareness", True)),
-                rotation_enabled=bool(data.get("rotation_enabled", False)),
-                rotation_interval_minutes=int(data.get("rotation_interval_minutes", 180)),
-                rotation_category=str(data.get("rotation_category", "Any")),
-                seasonal_theme_enabled=bool(data.get("seasonal_theme_enabled", False)),
-                preview_before_apply=bool(data.get("preview_before_apply", True)),
-            )
+            import dataclasses
+            valid_fields = {f.name for f in dataclasses.fields(cls)}
+            filtered = {k: v for k, v in data.items() if k in valid_fields}
+            return cls(**filtered)
         except Exception:
             return cls()
 
