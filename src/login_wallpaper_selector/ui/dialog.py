@@ -265,21 +265,24 @@ class WallpaperSelectorDialog:
         )
         title_lbl.pack(side="left")
 
-        self.update_check_btn = (
-            ctk.CTkButton(
-                top_title_row,
-                text="🔄 Updates",
-                width=85,
-                height=26,
-                font=ctk.CTkFont(size=11),
-                fg_color="#1f2937",
-                hover_color="#374151",
-                command=self.on_manual_check_update,
+        if not self.parent_frame:
+            self.update_check_btn = (
+                ctk.CTkButton(
+                    top_title_row,
+                    text="🔄 Updates",
+                    width=85,
+                    height=26,
+                    font=ctk.CTkFont(size=11),
+                    fg_color="#1f2937",
+                    hover_color="#374151",
+                    command=self.on_manual_check_update,
+                )
+                if HAS_CUSTOMTKINTER
+                else tk.Button(top_title_row, text="🔄 Updates", font=("Helvetica", 8), command=self.on_manual_check_update)
             )
-            if HAS_CUSTOMTKINTER
-            else tk.Button(top_title_row, text="🔄 Updates", font=("Helvetica", 8), command=self.on_manual_check_update)
-        )
-        self.update_check_btn.pack(side="right")
+            self.update_check_btn.pack(side="right")
+        else:
+            self.update_check_btn = None
 
         subtitle_lbl = (
             ctk.CTkLabel(

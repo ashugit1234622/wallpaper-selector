@@ -41,10 +41,10 @@ def test_app_shell_tool_switching(monkeypatch):
     shell.wallpaper_frame.pack.assert_called()
 
 
-def test_wallpaper_dialog_backward_compatibility(monkeypatch):
-    # Ensure standalone WallpaperSelectorDialog still initializes without parent_frame
+def test_wallpaper_dialog_parent_frame_handling(monkeypatch):
     monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
     cfg = AppConfig()
-    dialog = WallpaperSelectorDialog(config=cfg)
-    assert dialog.parent_frame is None
+    parent = MagicMock()
+    dialog = WallpaperSelectorDialog(config=cfg, parent_frame=parent)
+    assert dialog.parent_frame == parent
     assert dialog.config == cfg

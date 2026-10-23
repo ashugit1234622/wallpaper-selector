@@ -74,6 +74,7 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         self.cancel_event: Optional[threading.Event] = None
 
         self._build_widgets()
+        self.pack(fill="both", expand=True)
         # Initial scan on load
         self.after(300, self.on_scan_folder)
 
@@ -345,43 +346,9 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         self.search_entry.pack(side="right")
         self.search_entry.bind("<KeyRelease>", lambda e: self._refresh_table_display())
 
-        # Table container
-        table_container = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=6) if HAS_CUSTOMTKINTER else tk.Frame(self)
-        table_container.pack(fill="both", expand=True, padx=16, pady=4)
-
-        # Use Treeview with custom dark styling for responsive display
-        columns = ("selected", "filename", "category", "proposed_dest", "size", "status")
-        self.tree = ttk.Treeview(
-            table_container,
-            columns=columns,
-            show="headings",
-            selectmode="browse",
-        )
-        self.tree.heading("selected", text="[x]", anchor="center")
-        self.tree.heading("filename", text="Filename", anchor="w")
-        self.tree.heading("category", text="Category", anchor="w")
-        self.tree.heading("proposed_dest", text="Proposed Destination", anchor="w")
-        self.tree.heading("size", text="Size", anchor="e")
-        self.tree.heading("status", text="Status", anchor="w")
-
-        self.tree.column("selected", width=40, stretch=False, anchor="center")
-        self.tree.column("filename", width=180, stretch=True, anchor="w")
-        self.tree.column("category", width=130, stretch=False, anchor="w")
-        self.tree.column("proposed_dest", width=260, stretch=True, anchor="w")
-        self.tree.column("size", width=80, stretch=False, anchor="e")
-        self.tree.column("status", width=150, stretch=False, anchor="w")
-
-        tree_scroll = ttk.Scrollbar(table_container, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=tree_scroll.set)
-
-        tree_scroll.pack(side="right", fill="y")
-        self.tree.pack(side="left", fill="both", expand=True)
-
-        self.tree.bind("<ButtonRelease-1>", self._on_tree_click)
-
-        # 6. Bottom Action Bar & Progress
+        # 6. Bottom Action Bar & Progress (Docked at bottom first so it is ALWAYS accessible)
         bottom_frame = ctk.CTkFrame(self, fg_color="#1e293b", corner_radius=8) if HAS_CUSTOMTKINTER else tk.Frame(self)
-        bottom_frame.pack(fill="x", padx=16, pady=(4, 12))
+        bottom_frame.pack(side="bottom", fill="x", padx=16, pady=(4, 12))
 
         b_top_row = ctk.CTkFrame(bottom_frame, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(bottom_frame)
         b_top_row.pack(fill="x", padx=12, pady=(8, 4))
@@ -457,6 +424,40 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
             else tk.Button(b_act_row, text="Organize", state="disabled", command=self.on_execute_plan)
         )
         self.execute_btn.pack(side="right")
+
+        # 5b. Table container - Fills remaining space between controls and bottom bar
+        table_container = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=6) if HAS_CUSTOMTKINTER else tk.Frame(self)
+        table_container.pack(fill="both", expand=True, padx=16, pady=4)
+
+        # Use Treeview with custom dark styling for responsive display
+        columns = ("selected", "filename", "category", "proposed_dest", "size", "status")
+        self.tree = ttk.Treeview(
+            table_container,
+            columns=columns,
+            show="headings",
+            selectmode="browse",
+        )
+        self.tree.heading("selected", text="[x]", anchor="center")
+        self.tree.heading("filename", text="Filename", anchor="w")
+        self.tree.heading("category", text="Category", anchor="w")
+        self.tree.heading("proposed_dest", text="Proposed Destination", anchor="w")
+        self.tree.heading("size", text="Size", anchor="e")
+        self.tree.heading("status", text="Status", anchor="w")
+
+        self.tree.column("selected", width=40, stretch=False, anchor="center")
+        self.tree.column("filename", width=180, stretch=True, anchor="w")
+        self.tree.column("category", width=130, stretch=False, anchor="w")
+        self.tree.column("proposed_dest", width=260, stretch=True, anchor="w")
+        self.tree.column("size", width=80, stretch=False, anchor="e")
+        self.tree.column("status", width=150, stretch=False, anchor="w")
+
+        tree_scroll = ttk.Scrollbar(table_container, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_scroll.set)
+
+        tree_scroll.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        self.tree.bind("<ButtonRelease-1>", self._on_tree_click)
 
     def _create_metric_card(self, parent, col: int, title: str, value: str, accent_color: str):
         card = (

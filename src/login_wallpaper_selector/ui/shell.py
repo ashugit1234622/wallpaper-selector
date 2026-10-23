@@ -239,6 +239,7 @@ class AppShell:
             config=self.config,
             root_window=self.root,
         )
+        self.organizer_tool.pack(fill="both", expand=True)
 
     def switch_tool(self, tool_id: str) -> None:
         """Switch between tools seamlessly without duplicating windows or losing state."""
