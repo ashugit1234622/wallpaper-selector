@@ -19,6 +19,7 @@ dependencies = [
     "platformdirs>=3.0.0",
     "customtkinter>=5.2.0; platform_system=='Windows' or platform_system=='Linux' or platform_system=='Darwin'",
     "pywin32>=305; platform_system=='Windows'",
+    "pystray>=0.19.0",
 ]
 
 [project.urls]

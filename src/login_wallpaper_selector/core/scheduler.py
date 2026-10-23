@@ -72,6 +72,11 @@ class WallpaperRotationDaemon:
 
     def get_seconds_until_next_rotation(self) -> float:
         """Calculate how many seconds remain until the next scheduled wallpaper rotation."""
+        if hasattr(self.history, "reload"):
+            try:
+                self.history.reload()
+            except Exception:
+                pass
         records = self.history.records
         if not records:
             return 0.0

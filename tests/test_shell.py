@@ -48,3 +48,39 @@ def test_wallpaper_dialog_parent_frame_handling(monkeypatch):
     dialog = WallpaperSelectorDialog(config=cfg, parent_frame=parent)
     assert dialog.parent_frame == parent
     assert dialog.config == cfg
+
+
+def test_app_shell_close_minimizes_when_rotation_enabled(monkeypatch):
+    monkeypatch.setattr(AppShell, "_init_window", lambda self: setattr(self, "root", MagicMock()))
+    monkeypatch.setattr(AppShell, "_build_shell", lambda self: None)
+    monkeypatch.setattr(AppShell, "switch_tool", lambda self, tool: None)
+
+    cfg = AppConfig(rotation_enabled=True)
+    shell = AppShell(config=cfg)
+
+    minimized = []
+    quit_called = []
+    monkeypatch.setattr(shell, "_minimize_to_tray", lambda: minimized.append(True))
+    monkeypatch.setattr(shell, "quit_app", lambda: quit_called.append(True))
+
+    shell.on_close_window()
+    assert len(minimized) == 1
+    assert len(quit_called) == 0
+
+
+def test_app_shell_close_quits_when_rotation_disabled(monkeypatch):
+    monkeypatch.setattr(AppShell, "_init_window", lambda self: setattr(self, "root", MagicMock()))
+    monkeypatch.setattr(AppShell, "_build_shell", lambda self: None)
+    monkeypatch.setattr(AppShell, "switch_tool", lambda self, tool: None)
+
+    cfg = AppConfig(rotation_enabled=False)
+    shell = AppShell(config=cfg)
+
+    minimized = []
+    quit_called = []
+    monkeypatch.setattr(shell, "_minimize_to_tray", lambda: minimized.append(True))
+    monkeypatch.setattr(shell, "quit_app", lambda: quit_called.append(True))
+
+    shell.on_close_window()
+    assert len(minimized) == 0
+    assert len(quit_called) == 1

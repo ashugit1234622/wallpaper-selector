@@ -62,8 +62,14 @@ class WallpaperSelectorDialog:
         self._current_search_id: int = 0
         self.suggestion_buttons = []
         self.is_busy = False
+        self._rotation_timer_id: Optional[str] = None
+        self._is_auto_rotating: bool = False
+        self._tray_mgr: Optional[Any] = None
 
         self._init_window()
+
+        if hasattr(self, "root") and self.root:
+            self._schedule_next_rotation_check(delay_ms=3000)
 
         if not self.parent_frame and getattr(self.config, "check_for_updates_on_startup", True) and hasattr(self, "root") and self.root:
             self.root.after(1500, self._check_for_updates_startup)
@@ -112,6 +118,7 @@ class WallpaperSelectorDialog:
 
         # Listen for window resize to adjust responsive wrapping
         self.root.bind("<Configure>", self._on_window_configure)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
 
     def _center_window(self, width: int, height: int) -> None:
         self.root.update_idletasks()
@@ -775,11 +782,12 @@ class WallpaperSelectorDialog:
         self.is_busy = busy
         state = "disabled" if busy else "normal"
         def _update():
-            for cat, btn in self.cat_buttons.items():
-                if busy and self.current_category == cat:
-                    btn.configure(state="normal") if HAS_CUSTOMTKINTER else btn.config(state="normal")
-                else:
-                    btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
+            if hasattr(self, "cat_buttons"):
+                for cat, btn in self.cat_buttons.items():
+                    if busy and self.current_category == cat:
+                        btn.configure(state="normal") if HAS_CUSTOMTKINTER else btn.config(state="normal")
+                    else:
+                        btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
             if hasattr(self, "search_btn"):
                 self.search_btn.configure(state=state) if HAS_CUSTOMTKINTER else self.search_btn.config(state=state)
             if hasattr(self, "clear_search_btn"):
@@ -789,21 +797,27 @@ class WallpaperSelectorDialog:
             if hasattr(self, "suggestion_buttons"):
                 for sb in self.suggestion_buttons:
                     sb.configure(state=state) if HAS_CUSTOMTKINTER else sb.config(state=state)
-            if (self.current_keyword or self.current_category or self.selected_color != ColorPalette.ANY or self.selected_mood != WallpaperMood.ANY or getattr(self.config, "seasonal_theme_enabled", False) or self.staged_metadata or self.current_metadata) and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+            if hasattr(self, "retry_btn") and (self.current_keyword or self.current_category or self.selected_color != ColorPalette.ANY or self.selected_mood != WallpaperMood.ANY or getattr(self.config, "seasonal_theme_enabled", False) or self.staged_metadata or self.current_metadata) and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
                 retry_state = "disabled" if busy else "normal"
                 self.retry_btn.configure(state=retry_state) if HAS_CUSTOMTKINTER else self.retry_btn.config(state=retry_state)
             target_meta = self.staged_metadata or self.current_metadata
             if target_meta:
                 action_state = "disabled" if busy else "normal"
-                self.save_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.save_btn.config(state=action_state)
-                self.fav_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.fav_btn.config(state=action_state)
-                for sb in self.star_buttons:
-                    sb.configure(state=action_state) if HAS_CUSTOMTKINTER else sb.config(state=action_state)
-                if self.staged_metadata and self.staged_metadata != self.current_metadata:
+                if hasattr(self, "save_btn"):
+                    self.save_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.save_btn.config(state=action_state)
+                if hasattr(self, "fav_btn"):
+                    self.fav_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.fav_btn.config(state=action_state)
+                if hasattr(self, "star_buttons"):
+                    for sb in self.star_buttons:
+                        sb.configure(state=action_state) if HAS_CUSTOMTKINTER else sb.config(state=action_state)
+                if hasattr(self, "apply_btn") and self.staged_metadata and self.staged_metadata != self.current_metadata:
                     self.apply_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_btn.config(state=action_state)
                 if hasattr(self, "lockscreen_btn"):
                     self.lockscreen_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.lockscreen_btn.config(state=action_state)
-        self.root.after(0, _update)
+        if hasattr(self, "root") and self.root:
+            self.root.after(0, _update)
+        else:
+            _update()
 
     def on_mode_change(self, *args) -> None:
         new_mode = self.mode_var.get()
@@ -895,13 +909,175 @@ class WallpaperSelectorDialog:
         self.config.save()
         desc = f"Enabled ({self.config.rotation_interval_minutes}m interval)" if enabled else "Disabled"
         self.set_status(f"Auto-Rotation: {desc}.")
+        if enabled:
+            self._schedule_next_rotation_check(delay_ms=500)
+        else:
+            if self._rotation_timer_id and hasattr(self, "root") and self.root:
+                try:
+                    self.root.after_cancel(self._rotation_timer_id)
+                except Exception:
+                    pass
+                self._rotation_timer_id = None
 
     def on_interval_change(self, val: str) -> None:
         """Handle change in rotation interval."""
-        from ..core.scheduler import parse_interval_minutes
+        from ..core.scheduler import parse_interval_minutes, WallpaperRotationDaemon
         self.config.rotation_interval_minutes = parse_interval_minutes(val)
         self.config.save()
-        self.set_status(f"Rotation interval updated to {self.config.rotation_interval_minutes} minutes.")
+        daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+        rem = daemon.get_seconds_until_next_rotation()
+        if rem <= 0.0 and self.config.rotation_enabled:
+            self.set_status(f"Rotation interval: {self.config.rotation_interval_minutes}m. Rotation due now!")
+            self._schedule_next_rotation_check(delay_ms=500)
+        else:
+            mins = int(rem // 60)
+            secs = int(rem % 60)
+            time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+            self.set_status(f"Rotation interval: {self.config.rotation_interval_minutes}m (Next in {time_str}).")
+            self._schedule_next_rotation_check(delay_ms=1000)
+
+    def _schedule_next_rotation_check(self, delay_ms: int = 15000) -> None:
+        """Schedule the next periodic rotation check."""
+        if not hasattr(self, "root") or not self.root:
+            return
+        if self._rotation_timer_id:
+            try:
+                self.root.after_cancel(self._rotation_timer_id)
+            except Exception:
+                pass
+            self._rotation_timer_id = None
+        try:
+            self._rotation_timer_id = self.root.after(delay_ms, self._check_rotation_schedule)
+        except Exception:
+            self._rotation_timer_id = None
+
+    def _check_rotation_schedule(self) -> None:
+        """Check if scheduled wallpaper rotation is due and execute if needed."""
+        self._rotation_timer_id = None
+        if not getattr(self.config, "rotation_enabled", False):
+            # Check again periodically in case user enables it
+            self._schedule_next_rotation_check(15000)
+            return
+
+        if self.is_busy or self._is_auto_rotating:
+            # Busy performing manual fetch or rotation; defer check
+            self._schedule_next_rotation_check(5000)
+            return
+
+        from ..core.scheduler import WallpaperRotationDaemon
+        daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+
+        if daemon.is_rotation_due():
+            self._perform_scheduled_auto_rotate()
+        else:
+            rem = daemon.get_seconds_until_next_rotation()
+            delay_ms = max(5000, min(30000, int(rem * 1000)))
+            self._schedule_next_rotation_check(delay_ms)
+
+    def _perform_scheduled_auto_rotate(self) -> None:
+        """Execute scheduled background wallpaper rotation without disturbing active manual previews."""
+        if self._is_auto_rotating or self.is_busy:
+            self._schedule_next_rotation_check(5000)
+            return
+
+        self._is_auto_rotating = True
+
+        def _worker():
+            from ..core.scheduler import WallpaperRotationDaemon
+            daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+
+            color_filter = self.selected_color if self.selected_color != ColorPalette.ANY else None
+            mood_filter = self.selected_mood if self.selected_mood != WallpaperMood.ANY else None
+
+            meta, err = daemon.rotate_now(
+                color=color_filter,
+                mood=mood_filter,
+            )
+
+            def _on_done():
+                self._is_auto_rotating = False
+                if meta:
+                    # Critical Rule: If user is actively previewing an image, do NOT overwrite their preview!
+                    if self.staged_metadata is not None:
+                        self.set_status(f"✓ Auto-rotated desktop: '{meta.title}' (Active manual preview preserved)")
+                    else:
+                        self.current_metadata = meta
+                        self.set_status(f"✓ Auto-rotated desktop: '{meta.title}' ({meta.category})")
+                        self._update_preview_and_attribution(meta, staged=False)
+                else:
+                    if err:
+                        self.set_status(f"Scheduled auto-rotation skipped: {err}")
+                self._schedule_next_rotation_check(15000)
+
+            if hasattr(self, "root") and self.root:
+                try:
+                    self.root.after(0, _on_done)
+                except Exception:
+                    _on_done()
+            else:
+                _on_done()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def on_close_window(self) -> None:
+        """Handle window close event for standalone dialog."""
+        from .tray import SystemTrayManager
+        if getattr(self.config, "rotation_enabled", False) and SystemTrayManager.is_available():
+            self._minimize_to_tray()
+        else:
+            self.quit_app()
+
+    def _minimize_to_tray(self) -> None:
+        """Minimize standalone dialog to system tray."""
+        from .tray import SystemTrayManager
+        if not hasattr(self, "_tray_mgr") or self._tray_mgr is None:
+            self._tray_mgr = SystemTrayManager(
+                on_show=self._restore_from_tray,
+                on_rotate_now=self.on_rotate_now,
+                on_quit=self.quit_app,
+                app_name="Login Wallpaper Selector",
+            )
+        self.root.withdraw()
+        if self._tray_mgr.start():
+            self._tray_mgr.notify(
+                "Running in background. Desktop wallpaper will continue rotating automatically.",
+                "Login Wallpaper Selector",
+            )
+
+    def _restore_from_tray(self) -> None:
+        """Restore standalone dialog from system tray."""
+        def _do_restore():
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+            if hasattr(self, "_tray_mgr") and self._tray_mgr:
+                self._tray_mgr.stop()
+        if hasattr(self, "root") and self.root:
+            self.root.after(0, _do_restore)
+
+    def quit_app(self) -> None:
+        """Cleanly exit application and cancel timers."""
+        self.cleanup()
+        if hasattr(self, "root") and self.root:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
+    def cleanup(self) -> None:
+        """Cancel pending rotation timers and cleanup system tray icon."""
+        if hasattr(self, "root") and self.root and self._rotation_timer_id:
+            try:
+                self.root.after_cancel(self._rotation_timer_id)
+            except Exception:
+                pass
+            self._rotation_timer_id = None
+        if hasattr(self, "_tray_mgr") and self._tray_mgr:
+            try:
+                self._tray_mgr.stop()
+            except Exception:
+                pass
+            self._tray_mgr = None
 
     def on_rotate_now(self) -> None:
         """Trigger an instant wallpaper rotation in background worker thread."""
@@ -1346,14 +1522,19 @@ class WallpaperSelectorDialog:
             success = self.adapter.set_wallpaper(target_path, mode=mode)
             if success:
                 self.current_metadata = target_meta
+                self.staged_metadata = None
                 self.set_status(f"✓ Applied wallpaper: {target_meta.title} ({mode})", progress=1.0)
 
                 def _ui_update():
-                    if HAS_CUSTOMTKINTER:
-                        self.apply_btn.configure(text="✓ Applied!", fg_color="#059669", state="disabled")
-                    else:
-                        self.apply_btn.config(text="✓ Applied!", state="disabled")
-                self.root.after(0, _ui_update)
+                    if hasattr(self, "apply_btn"):
+                        if HAS_CUSTOMTKINTER:
+                            self.apply_btn.configure(text="✓ Applied!", fg_color="#059669", state="disabled")
+                        else:
+                            self.apply_btn.config(text="✓ Applied!", state="disabled")
+                if hasattr(self, "root") and self.root:
+                    self.root.after(0, _ui_update)
+                else:
+                    _ui_update()
             else:
                 self.set_status("Error: Desktop adapter could not apply wallpaper.")
             self.set_busy(False)

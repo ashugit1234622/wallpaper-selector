@@ -29,6 +29,7 @@ class AppShell:
     def __init__(self, config: Optional[AppConfig] = None):
         self.config = config or AppConfig.load()
         self.active_tool = "wallpaper"
+        self._tray_mgr: Optional[Any] = None
         self._init_window()
         self._build_shell()
         self.switch_tool("wallpaper")
@@ -62,6 +63,7 @@ class AppShell:
                 pass
 
         self._center_window(win_w, win_h)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close_window)
 
     def _center_window(self, width: int, height: int) -> None:
         self.root.update_idletasks()
@@ -315,6 +317,68 @@ class AppShell:
                     ),
                 )
         threading.Thread(target=_worker, daemon=True).start()
+
+    def on_close_window(self) -> None:
+        """Handle window close event: minimize to tray if auto-rotation is enabled, else exit."""
+        from .tray import SystemTrayManager
+        rotation_active = bool(getattr(self.config, "rotation_enabled", False))
+        if rotation_active and SystemTrayManager.is_available():
+            self._minimize_to_tray()
+        else:
+            self.quit_app()
+
+    def _minimize_to_tray(self) -> None:
+        """Minimize shell window to system tray to keep background rotation active."""
+        from .tray import SystemTrayManager
+        if not hasattr(self, "_tray_mgr") or self._tray_mgr is None:
+            self._tray_mgr = SystemTrayManager(
+                on_show=self._restore_from_tray,
+                on_rotate_now=self._tray_rotate_now,
+                on_quit=self.quit_app,
+                app_name="Desktop Utility Suite",
+            )
+        self.root.withdraw()
+        if self._tray_mgr.start():
+            self._tray_mgr.notify(
+                "Running in background. Desktop wallpaper will continue rotating automatically.",
+                "Desktop Utility Suite",
+            )
+
+    def _restore_from_tray(self) -> None:
+        """Restore GUI window from system tray."""
+        def _do_restore():
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+            if hasattr(self, "_tray_mgr") and self._tray_mgr:
+                self._tray_mgr.stop()
+        if hasattr(self, "root") and self.root:
+            self.root.after(0, _do_restore)
+
+    def _tray_rotate_now(self) -> None:
+        """Trigger instant rotation from tray icon menu."""
+        if hasattr(self, "wallpaper_tool") and hasattr(self.wallpaper_tool, "on_rotate_now"):
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, self.wallpaper_tool.on_rotate_now)
+
+    def quit_app(self) -> None:
+        """Cleanly terminate application and background services."""
+        if hasattr(self, "_tray_mgr") and self._tray_mgr:
+            try:
+                self._tray_mgr.stop()
+            except Exception:
+                pass
+            self._tray_mgr = None
+        if hasattr(self, "wallpaper_tool") and hasattr(self.wallpaper_tool, "cleanup"):
+            try:
+                self.wallpaper_tool.cleanup()
+            except Exception:
+                pass
+        if hasattr(self, "root") and self.root:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
 
     def run(self) -> None:
         """Run the application shell main event loop."""

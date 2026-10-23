@@ -125,3 +125,255 @@ def test_daemon_run_loop_stop(tmp_path: Path, monkeypatch):
     assert not th.is_alive()
     assert any("started" in l for l in logs)
     assert any("stopped" in l for l in logs)
+
+
+def test_history_tracker_reload(tmp_path: Path):
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"))
+    tracker1 = HistoryTracker(cfg)
+    tracker2 = HistoryTracker(cfg)
+
+    # Tracker 1 records an image
+    tracker1.record(item_id="img_sync_1", category="Space", title="Galaxy")
+    assert len(tracker1.records) == 1
+
+    # Tracker 2 before reload has 0 records
+    assert len(tracker2.records) == 0
+
+    # Tracker 2 after reload has 1 record
+    reloaded = tracker2.reload()
+    assert len(reloaded) == 1
+    assert reloaded[0].image_id == "img_sync_1"
+
+
+def test_scheduler_reloads_history_on_check(tmp_path: Path):
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), rotation_interval_minutes=30)
+    tracker = HistoryTracker(cfg)
+    daemon = WallpaperRotationDaemon(config=cfg, history=tracker)
+
+    # Initially no records -> due immediately
+    assert daemon.is_rotation_due() is True
+
+    # Another process/tracker writes a record
+    other_tracker = HistoryTracker(cfg)
+    other_tracker.record(item_id="img_recent", category="Space")
+
+    # daemon.is_rotation_due() should reload history and determine it is NOT due
+    assert daemon.is_rotation_due() is False
+    assert daemon.get_seconds_until_next_rotation() > 1700.0
+
+
+def test_auto_rotate_preserves_staged_preview(tmp_path: Path, monkeypatch):
+    """When a scheduled rotation completes, an active manual staged preview MUST NOT be overwritten."""
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), rotation_enabled=True)
+    dialog = WallpaperSelectorDialog(config=cfg)
+
+    staged_meta = WallpaperMetadata(
+        image_id="manual_search_1",
+        category="Space",
+        provider="Wallhaven",
+        source_url="https://example.com/source",
+        download_url="https://example.com/image.jpg",
+        local_path=str(tmp_path / "manual.jpg"),
+        sha256="manual_sha",
+        title="Manual Nebula Preview",
+        creator="Artist",
+        license="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="",
+        width=1920,
+        height=1080,
+        aspect_ratio=1.778,
+        mode="Fill",
+    )
+    dialog.staged_metadata = staged_meta
+
+    rotated_meta = WallpaperMetadata(
+        image_id="auto_rotated_2",
+        category="Nature",
+        provider="Unsplash",
+        source_url="https://example.com/source",
+        download_url="https://example.com/image2.jpg",
+        local_path=str(tmp_path / "auto.jpg"),
+        sha256="auto_sha",
+        title="Auto Forest",
+        creator="Artist2",
+        license="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="",
+        width=1920,
+        height=1080,
+        aspect_ratio=1.778,
+        mode="Fill",
+    )
+
+    # Mock daemon rotate_now to return rotated_meta
+    monkeypatch.setattr(
+        WallpaperRotationDaemon,
+        "rotate_now",
+        lambda self, *a, **kw: (rotated_meta, None),
+    )
+
+    # Trigger scheduled auto-rotate
+    status_messages = []
+    dialog.set_status = lambda msg, **kw: status_messages.append(msg)
+
+    # Perform background rotation worker synchronously for testing
+    dialog._perform_scheduled_auto_rotate()
+    # Wait for thread to complete
+    time.sleep(0.3)
+
+    # CRITICAL ASSERTION: The staged preview must NOT be replaced!
+    assert dialog.staged_metadata is not None
+    assert dialog.staged_metadata.image_id == "manual_search_1"
+    assert dialog.staged_metadata.title == "Manual Nebula Preview"
+    assert any("preserved" in m.lower() for m in status_messages)
+
+
+def test_auto_rotate_updates_preview_when_no_staged_preview(tmp_path: Path, monkeypatch):
+    """When no manual preview is staged, scheduled auto-rotation updates current_metadata."""
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), rotation_enabled=True)
+    dialog = WallpaperSelectorDialog(config=cfg)
+    dialog.staged_metadata = None
+
+    rotated_meta = WallpaperMetadata(
+        image_id="auto_rotated_3",
+        category="Nature",
+        provider="Unsplash",
+        source_url="https://example.com/source",
+        download_url="https://example.com/image3.jpg",
+        local_path=str(tmp_path / "auto3.jpg"),
+        sha256="auto_sha_3",
+        title="Auto Mountain",
+        creator="Artist3",
+        license="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="",
+        width=1920,
+        height=1080,
+        aspect_ratio=1.778,
+        mode="Fill",
+    )
+
+    monkeypatch.setattr(
+        WallpaperRotationDaemon,
+        "rotate_now",
+        lambda self, *a, **kw: (rotated_meta, None),
+    )
+    dialog._update_preview_and_attribution = lambda meta, staged=False: None
+    dialog.set_status = lambda *a, **kw: None
+
+    dialog._perform_scheduled_auto_rotate()
+    time.sleep(0.3)
+
+    assert dialog.current_metadata is not None
+    assert dialog.current_metadata.image_id == "auto_rotated_3"
+
+
+def test_on_apply_staged_clears_staged_metadata(tmp_path: Path, monkeypatch):
+    """Applying a staged preview clears staged_metadata and commits current_metadata."""
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"))
+    dialog = WallpaperSelectorDialog(config=cfg)
+
+    img_file = tmp_path / "test_apply.jpg"
+    img = Image.new("RGB", (100, 100), color=(10, 20, 30))
+    img.save(img_file)
+
+    staged_meta = WallpaperMetadata(
+        image_id="stage_to_apply",
+        category="Space",
+        provider="Wallhaven",
+        source_url="https://example.com/source",
+        download_url="https://example.com/image.jpg",
+        local_path=str(img_file),
+        sha256="dummy_sha",
+        title="To Apply",
+        creator="Artist",
+        license="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="",
+        width=100,
+        height=100,
+        aspect_ratio=1.0,
+        mode="Fill",
+    )
+    dialog.staged_metadata = staged_meta
+    dialog.set_status = lambda *a, **kw: None
+    monkeypatch.setattr(dialog.adapter, "set_wallpaper", lambda p, mode: True)
+
+    class DummyVar:
+        def get(self):
+            return "Fill"
+    dialog.mode_var = DummyVar()
+
+    dialog.on_apply_staged()
+    time.sleep(0.2)
+
+    assert dialog.current_metadata == staged_meta
+    assert dialog.staged_metadata is None
+
+
+def test_window_close_minimizes_when_rotation_enabled(tmp_path: Path, monkeypatch):
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), rotation_enabled=True)
+    dialog = WallpaperSelectorDialog(config=cfg)
+
+    minimized = []
+    quit_called = []
+    monkeypatch.setattr(dialog, "_minimize_to_tray", lambda: minimized.append(True))
+    monkeypatch.setattr(dialog, "quit_app", lambda: quit_called.append(True))
+
+    dialog.on_close_window()
+    assert len(minimized) == 1
+    assert len(quit_called) == 0
+
+
+def test_window_close_quits_when_rotation_disabled(tmp_path: Path, monkeypatch):
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    cfg = AppConfig(custom_cache_dir=str(tmp_path / "cache"), rotation_enabled=False)
+    dialog = WallpaperSelectorDialog(config=cfg)
+
+    minimized = []
+    quit_called = []
+    monkeypatch.setattr(dialog, "_minimize_to_tray", lambda: minimized.append(True))
+    monkeypatch.setattr(dialog, "quit_app", lambda: quit_called.append(True))
+
+    dialog.on_close_window()
+    assert len(minimized) == 0
+    assert len(quit_called) == 1
+
+
+def test_system_tray_manager_callbacks():
+    from login_wallpaper_selector.ui.tray import SystemTrayManager
+
+    events = []
+    mgr = SystemTrayManager(
+        on_show=lambda: events.append("show"),
+        on_rotate_now=lambda: events.append("rotate"),
+        on_quit=lambda: events.append("quit"),
+    )
+
+    mgr._handle_show()
+    assert "show" in events
+
+    mgr._handle_rotate_now()
+    assert "rotate" in events
+
+    mgr._handle_quit()
+    assert "quit" in events

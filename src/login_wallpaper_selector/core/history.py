@@ -18,6 +18,7 @@ class HistoryTracker:
             self.history_file = Path(config.custom_cache_dir) / "history.json"
         else:
             self.history_file = AppConfig.get_default_data_dir() / "history.json"
+        self._last_loaded_mtime: float = 0.0
         self._records: List[HistoryRecord] = self._load()
 
     @property
@@ -31,10 +32,23 @@ class HistoryTracker:
     def get_latest_record(self) -> Optional[HistoryRecord]:
         return self._records[-1] if self._records else None
 
+    def reload(self) -> List[HistoryRecord]:
+        """Reload records from history.json on disk to stay in sync with background operations."""
+        if not self.history_file.exists():
+            return self._records
+        try:
+            current_mtime = self.history_file.stat().st_mtime
+            if current_mtime > self._last_loaded_mtime:
+                self._records = self._load()
+        except Exception:
+            pass
+        return self._records
+
     def _load(self) -> List[HistoryRecord]:
         if not self.history_file.exists():
             return []
         try:
+            self._last_loaded_mtime = self.history_file.stat().st_mtime
             with open(self.history_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
@@ -61,6 +75,8 @@ class HistoryTracker:
             self.history_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self.history_file, "w", encoding="utf-8") as f:
                 json.dump([r.to_dict() for r in self._records], f, indent=2)
+            if self.history_file.exists():
+                self._last_loaded_mtime = self.history_file.stat().st_mtime
         except Exception:
             pass
 
