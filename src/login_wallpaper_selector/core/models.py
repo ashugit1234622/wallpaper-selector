@@ -13,6 +13,7 @@ class WallpaperCategory(str, Enum):
     ART = "Art"
     PORTRAIT = "Portrait"
     LOCAL_STORAGE = "Local Storage"
+    FAVORITES = "Favorites"
 
 
 class WallpaperPosition(str, Enum):
@@ -47,6 +48,8 @@ class HistoryRecord:
     category: str = ""
     sha256: Optional[str] = None
     title: Optional[str] = None
+    is_favorite: bool = False
+    rating: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -55,6 +58,8 @@ class HistoryRecord:
             "category": self.category,
             "sha256": self.sha256,
             "title": self.title,
+            "is_favorite": self.is_favorite,
+            "rating": self.rating,
         }
 
     @classmethod
@@ -65,6 +70,8 @@ class HistoryRecord:
             category=str(data.get("category", "")),
             sha256=data.get("sha256"),
             title=data.get("title"),
+            is_favorite=bool(data.get("is_favorite", False)),
+            rating=int(data.get("rating", 0)),
         )
 
 
@@ -129,6 +136,9 @@ class WallpaperMetadata:
     mode: str  # "Fill" or "Fit"
     dominant_color_hex: Optional[str] = None
     mood: Optional[str] = None
+    season: Optional[str] = None
+    is_favorite: bool = False
+    rating: int = 0
     applied_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
     @property
@@ -163,4 +173,7 @@ class WallpaperMetadata:
             "mode": self.mode,
             "dominant_color_hex": self.dominant_color_hex,
             "mood": self.mood,
+            "season": self.season,
+            "is_favorite": self.is_favorite,
+            "rating": self.rating,
         }

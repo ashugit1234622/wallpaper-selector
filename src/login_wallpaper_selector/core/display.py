@@ -140,3 +140,120 @@ def render_wallpaper_for_screen(
 
     except Exception:
         return False
+
+
+def generate_desktop_preview_image(
+    source_path: Path,
+    mode: str = WallpaperPosition.FILL.value,
+    max_preview_width: int = 540,
+    max_preview_height: int = 160,
+    layout_aware: bool = True,
+    draw_mockup_frame: bool = True,
+) -> Optional[Image.Image]:
+    """Render a scaled desktop screen-fit and cropping preview for an image.
+    
+    Matches the primary monitor's true aspect ratio, accurately rendering
+    Fill (smart-cropped) vs Fit (letterbox/pillarbox with dark canvas).
+    Includes a subtle Windows desktop bezel and translucent mini taskbar mockup.
+    """
+    if not source_path.exists():
+        return None
+
+    try:
+        screen_w, screen_h = get_native_screen_resolution()
+        screen_ratio = screen_w / screen_h if screen_h > 0 else 1.778
+
+        # Calculate preview canvas dimensions matching true screen aspect ratio
+        if screen_ratio >= (max_preview_width / max_preview_height):
+            canvas_w = max_preview_width
+            canvas_h = max(60, int(max_preview_width / screen_ratio))
+        else:
+            canvas_h = max_preview_height
+            canvas_w = max(100, int(max_preview_height * screen_ratio))
+
+        with Image.open(source_path) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
+            src_w, src_h = img.size
+            if src_w <= 0 or src_h <= 0:
+                return None
+
+            src_ratio = src_w / src_h
+
+            if mode.lower() == WallpaperPosition.FILL.value.lower():
+                # Proportional scale to fill preview screen canvas
+                if src_ratio > screen_ratio:
+                    new_h = canvas_h
+                    new_w = max(canvas_w, int(src_w * (canvas_h / src_h)))
+                else:
+                    new_w = canvas_w
+                    new_h = max(canvas_h, int(src_h * (canvas_w / src_w)))
+
+                resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+
+                # Layout aware or center crop to canvas_w x canvas_h
+                if layout_aware and (new_w > canvas_w or new_h > canvas_h):
+                    try:
+                        from .layout_awareness import (
+                            analyze_desktop_layout,
+                            compute_image_saliency_focal_point,
+                            calculate_smart_crop_offset,
+                        )
+                        focal = compute_image_saliency_focal_point(img)
+                        profile = analyze_desktop_layout()
+                        left, top = calculate_smart_crop_offset(
+                            new_w, new_h, canvas_w, canvas_h, focal, profile
+                        )
+                    except Exception:
+                        left = (new_w - canvas_w) // 2
+                        top = (new_h - canvas_h) // 2
+                else:
+                    left = (new_w - canvas_w) // 2
+                    top = (new_h - canvas_h) // 2
+
+                preview_img = resized.crop((left, top, left + canvas_w, top + canvas_h))
+
+            else:
+                # FIT mode: Proportional fit inside canvas with dark letterbox/pillarbox
+                if src_ratio > screen_ratio:
+                    new_w = canvas_w
+                    new_h = max(1, int(src_h * (canvas_w / src_w)))
+                else:
+                    new_h = canvas_h
+                    new_w = max(1, int(src_w * (canvas_h / src_h)))
+
+                resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                preview_img = Image.new("RGB", (canvas_w, canvas_h), color=(15, 15, 20))
+                paste_x = (canvas_w - new_w) // 2
+                paste_y = (canvas_h - new_h) // 2
+                preview_img.paste(resized, (paste_x, paste_y))
+
+            # Overlay desktop mockup frame & taskbar if requested
+            if draw_mockup_frame:
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(preview_img, "RGBA")
+
+                # 1. Subtle desktop frame bezel (outer edge)
+                draw.rectangle([(0, 0), (canvas_w - 1, canvas_h - 1)], outline=(60, 70, 90, 180), width=1)
+
+                # 2. Translucent Windows taskbar mockup at bottom
+                tb_height = max(10, int(canvas_h * 0.08))
+                tb_y0 = canvas_h - tb_height
+                draw.rectangle([(0, tb_y0), (canvas_w, canvas_h)], fill=(15, 20, 30, 200))
+                draw.line([(0, tb_y0), (canvas_w, tb_y0)], fill=(80, 100, 130, 160), width=1)
+
+                # Mini Start accent icon in taskbar
+                icon_size = max(4, tb_height - 4)
+                icon_y = tb_y0 + (tb_height - icon_size) // 2
+                draw.rectangle([(8, icon_y), (8 + icon_size, icon_y + icon_size)], fill=(56, 189, 248, 220))
+
+                # Mode tag watermark in top-right
+                mode_tag = f"Desktop Preview ({mode})"
+                draw.rectangle([(canvas_w - 135, 4), (canvas_w - 4, 18)], fill=(0, 0, 0, 140))
+                draw.text((canvas_w - 130, 5), mode_tag, fill=(220, 220, 230, 220))
+
+            return preview_img
+
+    except Exception:
+        return None

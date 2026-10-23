@@ -19,26 +19,31 @@ import tkinter as tk
 from tkinter import messagebox
 
 from ..core.models import WallpaperCategory, WallpaperPosition, WallpaperMetadata, ColorPalette, WallpaperMood
+from ..core.seasonal import Season, get_current_season, get_season_display
+from ..core.favorites import FavoritesManager
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
 from ..core.cache import CacheManager
+from ..core.display import generate_desktop_preview_image
 from ..providers.router import ProviderRouter
 from ..adapters.factory import get_wallpaper_adapter
 from .file_picker import pick_local_image
 
 
 class WallpaperSelectorDialog:
-    """Desktop dialog displaying the 5 wallpaper options with live preview and controls."""
+    """Desktop dialog displaying the wallpaper options with live preview and controls."""
 
     def __init__(self, config: Optional[AppConfig] = None):
         self.config = config or AppConfig.load()
         self.history = HistoryTracker(self.config)
         self.cache = CacheManager(self.config)
+        self.favorites_mgr = FavoritesManager(self.config)
         self.router = ProviderRouter(self.config, self.history, self.cache)
         self.adapter = get_wallpaper_adapter()
 
         self.current_category: Optional[WallpaperCategory] = None
         self.current_metadata: Optional[WallpaperMetadata] = None
+        self.staged_metadata: Optional[WallpaperMetadata] = None
         self.selected_color: ColorPalette = ColorPalette.ANY
         self.selected_mood: WallpaperMood = WallpaperMood.ANY
         self.is_busy = False
@@ -54,8 +59,8 @@ class WallpaperSelectorDialog:
             self.root = tk.Tk()
 
         self.root.title("Choose Your Wallpaper")
-        self.root.geometry("640x780")
-        self.root.minsize(600, 740)
+        self.root.geometry("680x810")
+        self.root.minsize(640, 770)
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
 
@@ -68,7 +73,7 @@ class WallpaperSelectorDialog:
                 pass
 
         # Center on screen
-        self._center_window(640, 740)
+        self._center_window(680, 810)
 
         self._build_widgets()
 
@@ -81,7 +86,7 @@ class WallpaperSelectorDialog:
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_widgets(self) -> None:
-        # Bottom Action Buttons ("Try Another", "Done / Close")
+        # Bottom Action Buttons ("Try Another", "Save Image", "Open Folder", "Apply to Desktop", "Done / Close")
         # Pack bottom frame FIRST so it is firmly anchored to the bottom edge and never clipped
         bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
         bottom_frame.pack(side="bottom", fill="x", padx=24, pady=(10, 20))
@@ -90,7 +95,7 @@ class WallpaperSelectorDialog:
             self.retry_btn = ctk.CTkButton(
                 bottom_frame,
                 text="🔄 Try Another",
-                width=120,
+                width=115,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 state="disabled",
@@ -103,7 +108,7 @@ class WallpaperSelectorDialog:
             self.save_btn = ctk.CTkButton(
                 bottom_frame,
                 text="💾 Save Image",
-                width=125,
+                width=115,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 state="disabled",
@@ -116,7 +121,7 @@ class WallpaperSelectorDialog:
             self.open_folder_btn = ctk.CTkButton(
                 bottom_frame,
                 text="📂 Open Folder",
-                width=120,
+                width=115,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 state="disabled",
@@ -129,12 +134,25 @@ class WallpaperSelectorDialog:
             self.close_btn = ctk.CTkButton(
                 bottom_frame,
                 text="Done / Close",
-                width=110,
+                width=105,
                 height=38,
                 font=ctk.CTkFont(size=13, weight="bold"),
                 command=self.on_close,
             )
             self.close_btn.pack(side="right")
+
+            self.apply_btn = ctk.CTkButton(
+                bottom_frame,
+                text="✓ Apply to Desktop",
+                width=145,
+                height=38,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                state="disabled",
+                fg_color="#2563eb",
+                hover_color="#1d4ed8",
+                command=self.on_apply_staged,
+            )
+            self.apply_btn.pack(side="right", padx=6)
         else:
             self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
             self.retry_btn.pack(side="left", padx=4)
@@ -144,6 +162,8 @@ class WallpaperSelectorDialog:
             self.open_folder_btn.pack(side="left", padx=4)
             self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
             self.close_btn.pack(side="right")
+            self.apply_btn = tk.Button(bottom_frame, text="✓ Apply to Desktop", state="disabled", command=self.on_apply_staged)
+            self.apply_btn.pack(side="right", padx=4)
 
         # Header container
         header_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
@@ -182,13 +202,14 @@ class WallpaperSelectorDialog:
             (WallpaperCategory.ART, "🎨 Art", "#78350f"),
             (WallpaperCategory.PORTRAIT, "👤 Portrait", "#581c87"),
             (WallpaperCategory.LOCAL_STORAGE, "📁 Local Storage", "#374151"),
+            (WallpaperCategory.FAVORITES, "⭐ Favorites", "#b45309"),
         ]
 
         self.cat_buttons = {}
         for idx, (cat, label_text, color) in enumerate(categories):
             row = idx // 2
             col = idx % 2
-            colspan = 2 if idx == 4 else 1
+            colspan = 1
 
             if HAS_CUSTOMTKINTER:
                 btn = ctk.CTkButton(
@@ -345,6 +366,17 @@ class WallpaperSelectorDialog:
                 command=self.on_layout_toggle,
             )
             self.layout_chk.pack(side="right", padx=6, pady=8)
+
+            season_icon, season_name = get_season_display(get_current_season())
+            self.seasonal_var = ctk.BooleanVar(value=bool(getattr(self.config, "seasonal_theme_enabled", False)))
+            self.seasonal_chk = ctk.CTkCheckBox(
+                settings_frame,
+                text=f"{season_icon} {season_name}",
+                variable=self.seasonal_var,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=self.on_seasonal_toggle,
+            )
+            self.seasonal_chk.pack(side="right", padx=6, pady=8)
         else:
             self.mode_var = tk.StringVar(value=self.config.default_position)
             for m in [WallpaperPosition.FILL.value, WallpaperPosition.FIT.value]:
@@ -368,6 +400,16 @@ class WallpaperSelectorDialog:
                 command=self.on_layout_toggle,
             )
             self.layout_chk.pack(side="right", padx=6, pady=8)
+
+            season_icon, season_name = get_season_display(get_current_season())
+            self.seasonal_var = tk.BooleanVar(value=bool(getattr(self.config, "seasonal_theme_enabled", False)))
+            self.seasonal_chk = tk.Checkbutton(
+                settings_frame,
+                text=f"{season_icon} {season_name}",
+                variable=self.seasonal_var,
+                command=self.on_seasonal_toggle,
+            )
+            self.seasonal_chk.pack(side="right", padx=6, pady=8)
 
         # Auto-Rotation Controls Bar
         rotate_frame = ctk.CTkFrame(self.root) if HAS_CUSTOMTKINTER else tk.Frame(self.root)
@@ -430,7 +472,7 @@ class WallpaperSelectorDialog:
             self.rotate_now_btn.pack(side="right", padx=12, pady=6)
 
         # Preview Container
-        self.preview_frame = ctk.CTkFrame(self.root, height=165) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=165, bg="black")
+        self.preview_frame = ctk.CTkFrame(self.root, height=170) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=170, bg="black")
         self.preview_frame.pack(fill="x", padx=24, pady=8)
         self.preview_frame.pack_propagate(False)
 
@@ -474,6 +516,56 @@ class WallpaperSelectorDialog:
         )
         self.attrib_lbl.pack(anchor="w", padx=24, pady=(2, 6))
 
+        # Favorite and Star Rating Toolbar
+        fav_rating_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        fav_rating_frame.pack(fill="x", padx=24, pady=(2, 6))
+
+        if HAS_CUSTOMTKINTER:
+            self.fav_btn = ctk.CTkButton(
+                fav_rating_frame,
+                text="🤍 Favorite",
+                width=115,
+                height=30,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#374151",
+                hover_color="#be185d",
+                state="disabled",
+                command=self.on_toggle_favorite,
+            )
+            self.fav_btn.pack(side="left")
+
+            rating_lbl = ctk.CTkLabel(fav_rating_frame, text="Rating:", font=ctk.CTkFont(size=12, weight="bold"))
+            rating_lbl.pack(side="left", padx=(16, 6))
+
+            self.star_buttons = []
+            for s in range(1, 6):
+                s_btn = ctk.CTkButton(
+                    fav_rating_frame,
+                    text="★",
+                    width=28,
+                    height=28,
+                    font=ctk.CTkFont(size=14, weight="bold"),
+                    fg_color="#1f2937",
+                    hover_color="#ca8a04",
+                    text_color="#9ca3af",
+                    state="disabled",
+                    command=lambda star=s: self.on_set_rating(star),
+                )
+                s_btn.pack(side="left", padx=2)
+                self.star_buttons.append(s_btn)
+        else:
+            self.fav_btn = tk.Button(fav_rating_frame, text="🤍 Favorite", state="disabled", command=self.on_toggle_favorite)
+            self.fav_btn.pack(side="left")
+
+            rating_lbl = tk.Label(fav_rating_frame, text="Rating:")
+            rating_lbl.pack(side="left", padx=(12, 4))
+
+            self.star_buttons = []
+            for s in range(1, 6):
+                s_btn = tk.Button(fav_rating_frame, text="★", state="disabled", command=lambda star=s: self.on_set_rating(star))
+                s_btn.pack(side="left", padx=1)
+                self.star_buttons.append(s_btn)
+
     def set_status(self, text: str, progress: Optional[float] = None) -> None:
         """Update status label and optional progress bar from any thread."""
         def _update():
@@ -491,30 +583,45 @@ class WallpaperSelectorDialog:
         def _update():
             for btn in self.cat_buttons.values():
                 btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
-            if self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
+            if self.current_category and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
                 retry_state = "disabled" if busy else "normal"
                 self.retry_btn.configure(state=retry_state) if HAS_CUSTOMTKINTER else self.retry_btn.config(state=retry_state)
-            if self.current_metadata:
-                save_state = "disabled" if busy else "normal"
-                self.save_btn.configure(state=save_state) if HAS_CUSTOMTKINTER else self.save_btn.config(state=save_state)
+            target_meta = self.staged_metadata or self.current_metadata
+            if target_meta:
+                action_state = "disabled" if busy else "normal"
+                self.save_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.save_btn.config(state=action_state)
+                self.fav_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.fav_btn.config(state=action_state)
+                for sb in self.star_buttons:
+                    sb.configure(state=action_state) if HAS_CUSTOMTKINTER else sb.config(state=action_state)
+                if self.staged_metadata and self.staged_metadata != self.current_metadata:
+                    self.apply_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_btn.config(state=action_state)
         self.root.after(0, _update)
 
     def on_mode_change(self, *args) -> None:
         new_mode = self.mode_var.get()
         self.config.default_position = new_mode
         self.config.save()
-        # If a wallpaper is currently active in this session, reapply with new mode
-        if self.current_metadata and Path(self.current_metadata.local_path).exists():
-            self.adapter.set_wallpaper(Path(self.current_metadata.local_path), mode=new_mode)
-            self.set_status(f"Updated display mode to {new_mode}.")
+        target_meta = self.staged_metadata or self.current_metadata
+        if target_meta:
+            self._render_preview_image(target_meta, mode=new_mode)
+            if self.config.preview_before_apply:
+                self.set_status(f"Preview updated to {new_mode}. Click 'Apply to Desktop' to confirm.")
+                if HAS_CUSTOMTKINTER:
+                    self.apply_btn.configure(state="normal", text="✓ Apply to Desktop", fg_color="#2563eb")
+                else:
+                    self.apply_btn.config(state="normal", text="✓ Apply to Desktop")
+            else:
+                if Path(target_meta.local_path).exists():
+                    self.adapter.set_wallpaper(Path(target_meta.local_path), mode=new_mode)
+                    self.set_status(f"Updated display mode to {new_mode}.")
 
     def on_lockscreen_toggle(self) -> None:
         enabled = self.lockscreen_var.get()
         self.config.also_set_lockscreen = enabled
         self.config.save()
-        # If active wallpaper exists and user checked box, apply to lock screen immediately
-        if enabled and self.current_metadata and Path(self.current_metadata.local_path).exists():
-            ok = self.adapter.set_lockscreen(Path(self.current_metadata.local_path))
+        target_meta = self.current_metadata or self.staged_metadata
+        if enabled and target_meta and Path(target_meta.local_path).exists():
+            ok = self.adapter.set_lockscreen(Path(target_meta.local_path))
             if ok:
                 self.set_status("✓ Applied current wallpaper to Lock Screen.")
 
@@ -523,7 +630,19 @@ class WallpaperSelectorDialog:
         enabled = self.layout_var.get()
         self.config.desktop_layout_awareness = enabled
         self.config.save()
+        target_meta = self.staged_metadata or self.current_metadata
+        if target_meta:
+            self._render_preview_image(target_meta)
         status_text = "Layout Awareness: Enabled (Smart Crop away from desktop icons)" if enabled else "Layout Awareness: Disabled (Center Crop)"
+        self.set_status(status_text)
+
+    def on_seasonal_toggle(self) -> None:
+        """Handle toggling of seasonal wallpaper themes."""
+        enabled = self.seasonal_var.get()
+        self.config.seasonal_theme_enabled = enabled
+        self.config.save()
+        icon, name = get_season_display(get_current_season())
+        status_text = f"Seasonal Theme ({icon} {name}): Enabled" if enabled else "Seasonal Theme: Disabled"
         self.set_status(status_text)
 
     def on_rotate_toggle(self) -> None:
@@ -622,10 +741,11 @@ class WallpaperSelectorDialog:
 
     def on_save_wallpaper(self) -> None:
         """Save the active wallpaper permanently to category's Saved folder."""
-        if not self.current_metadata:
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
             return
 
-        saved_path, err = self.cache.save_wallpaper_to_category(self.current_metadata)
+        saved_path, err = self.cache.save_wallpaper_to_category(target_meta)
         if saved_path:
             self.saved_category_folder = saved_path.parent
             if HAS_CUSTOMTKINTER:
@@ -641,10 +761,11 @@ class WallpaperSelectorDialog:
     def on_open_category_folder(self) -> None:
         """Open the category's Saved directory in Windows File Explorer."""
         folder = getattr(self, "saved_category_folder", None)
-        if not folder and self.current_metadata:
-            folder = self.cache.get_category_dir(self.current_metadata.category) / "Saved"
+        target_meta = self.staged_metadata or self.current_metadata
+        if not folder and target_meta:
+            folder = self.cache.get_category_dir(target_meta.category) / "Saved"
             if not folder.exists():
-                folder = self.cache.get_category_dir(self.current_metadata.category)
+                folder = self.cache.get_category_dir(target_meta.category)
 
         if folder and folder.exists():
             try:
@@ -661,8 +782,117 @@ class WallpaperSelectorDialog:
         self.current_category = category
         if category == WallpaperCategory.LOCAL_STORAGE:
             self._handle_local_storage()
+        elif category == WallpaperCategory.FAVORITES:
+            self._handle_favorites_category()
         else:
             self._handle_online_category(category)
+
+    def _handle_favorites_category(self) -> None:
+        """Handle selecting and cycling among favorited wallpapers."""
+        fav = self.favorites_mgr.get_random_favorite()
+        if not fav:
+            self.set_status("⭐ No favorites saved yet! Click ❤️ Favorite on wallpapers you like.")
+            return
+
+        fav_path = Path(fav.saved_path or fav.local_path)
+        if not fav_path.exists():
+            self.set_status(f"Favorite image not found on disk: {fav.title}")
+            return
+
+        self.set_busy(True)
+        self.set_status(f"Loading favorite: {fav.title}...")
+
+        def _worker():
+            mode = self.mode_var.get()
+            meta = self.cache.store_local_image(fav_path, mode=mode)
+            if not meta:
+                meta = WallpaperMetadata(
+                    image_id=fav.image_id,
+                    category="Favorites",
+                    provider=fav.provider or "Favorites",
+                    source_url="",
+                    download_url="",
+                    local_path=str(fav_path),
+                    sha256="",
+                    title=fav.title,
+                    creator="",
+                    license="",
+                    license_url=None,
+                    attribution_required=False,
+                    attribution_text=f"Favorite: {fav.title}",
+                    width=1920,
+                    height=1080,
+                    aspect_ratio=1.778,
+                    mode=mode,
+                    dominant_color_hex=fav.dominant_color_hex,
+                    mood=fav.mood,
+                    is_favorite=True,
+                    rating=fav.rating,
+                )
+            else:
+                meta.title = fav.title
+                meta.category = "Favorites"
+                meta.is_favorite = True
+                meta.rating = fav.rating
+
+            if self.config.preview_before_apply:
+                self.staged_metadata = meta
+                self.set_status(f"✓ Previewing favorite: {fav.title}. Click 'Apply to Desktop' to set.", progress=1.0)
+                self._update_preview_and_attribution(meta, staged=True)
+            else:
+                success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                if success:
+                    lock_msg = ""
+                    if self.lockscreen_var.get():
+                        lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                        if lock_ok:
+                            lock_msg = " & Lock Screen"
+                    self.current_metadata = meta
+                    self.set_status(f"✓ Applied favorite{lock_msg}: {fav.title}", progress=1.0)
+                    self._update_preview_and_attribution(meta, staged=False)
+                else:
+                    self.set_status("Failed to apply favorite wallpaper via adapter.")
+            self.set_busy(False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def on_toggle_favorite(self) -> None:
+        """Handle toggling of favorite status for currently active wallpaper."""
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
+            return
+        is_fav = self.favorites_mgr.toggle_favorite(target_meta)
+        target_meta.is_favorite = is_fav
+        if HAS_CUSTOMTKINTER:
+            self.fav_btn.configure(
+                text="❤️ Favorited" if is_fav else "🤍 Favorite",
+                fg_color="#9d174d" if is_fav else "#374151",
+            )
+        else:
+            self.fav_btn.config(text="❤️ Favorited" if is_fav else "🤍 Favorite")
+        status = "Added to Favorites ❤️" if is_fav else "Removed from Favorites"
+        self.set_status(f"{status}: {target_meta.title}")
+
+    def on_set_rating(self, rating: int) -> None:
+        """Handle setting or toggling 1-5 star rating for current wallpaper."""
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
+            return
+        curr = self.favorites_mgr.get_rating(target_meta.image_id)
+        new_rating = 0 if curr == rating else rating
+        self.favorites_mgr.set_rating(target_meta.image_id, new_rating, target_meta)
+        target_meta.rating = new_rating
+        for idx, star_btn in enumerate(self.star_buttons):
+            is_active = (idx < new_rating)
+            if HAS_CUSTOMTKINTER:
+                star_btn.configure(
+                    fg_color="#ca8a04" if is_active else "#1f2937",
+                    text_color="#fef08a" if is_active else "#9ca3af",
+                )
+            else:
+                star_btn.config(bg="#ca8a04" if is_active else "#ddd")
+        stars_str = ("★" * new_rating) if new_rating > 0 else "cleared"
+        self.set_status(f"Rating {stars_str} recorded for {target_meta.title}")
 
     def _handle_local_storage(self) -> None:
         self.set_status("Opening native file picker...")
@@ -680,19 +910,24 @@ class WallpaperSelectorDialog:
             mode = self.mode_var.get()
             meta = self.cache.store_local_image(selected_path, mode=mode)
             if meta:
-                success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
-                if success:
-                    lock_msg = ""
-                    if self.lockscreen_var.get():
-                        lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
-                        if lock_ok:
-                            lock_msg = " & Lock Screen"
-
-                    self.current_metadata = meta
-                    self.set_status(f"✓ Applied local wallpaper{lock_msg}: {selected_path.name}", progress=1.0)
-                    self._update_preview_and_attribution(meta)
+                if self.config.preview_before_apply:
+                    self.staged_metadata = meta
+                    self.set_status(f"✓ Previewing local image: {selected_path.name}. Click 'Apply to Desktop' to set.", progress=1.0)
+                    self._update_preview_and_attribution(meta, staged=True)
                 else:
-                    self.set_status("Failed to apply wallpaper through desktop adapter.")
+                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    if success:
+                        lock_msg = ""
+                        if self.lockscreen_var.get():
+                            lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                            if lock_ok:
+                                lock_msg = " & Lock Screen"
+
+                        self.current_metadata = meta
+                        self.set_status(f"✓ Applied local wallpaper{lock_msg}: {selected_path.name}", progress=1.0)
+                        self._update_preview_and_attribution(meta, staged=False)
+                    else:
+                        self.set_status("Failed to apply wallpaper through desktop adapter.")
             else:
                 self.set_status("Error: Selected file is corrupted or not a valid image.")
             self.set_busy(False)
@@ -723,26 +958,43 @@ class WallpaperSelectorDialog:
             )
 
             if meta:
-                self.set_status("Applying wallpaper to desktop...", progress=0.95)
-                success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
-                if success:
-                    lock_msg = ""
-                    if self.lockscreen_var.get():
-                        lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
-                        if lock_ok:
-                            lock_msg = " & Lock Screen"
-
-                    self.current_metadata = meta
-                    self.set_status(f"✓ Applied {category.value} wallpaper{lock_msg}: {meta.title}", progress=1.0)
-                    self._update_preview_and_attribution(meta)
+                self.staged_metadata = meta
+                if self.config.preview_before_apply:
+                    self.set_status(f"✓ Previewing {category.value}: {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
+                    self._update_preview_and_attribution(meta, staged=True)
                 else:
-                    self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
+                    self.set_status("Applying wallpaper to desktop...", progress=0.95)
+                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    if success:
+                        lock_msg = ""
+                        if self.lockscreen_var.get():
+                            lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                            if lock_ok:
+                                lock_msg = " & Lock Screen"
+
+                        self.current_metadata = meta
+                        self.set_status(f"✓ Applied {category.value} wallpaper{lock_msg}: {meta.title}", progress=1.0)
+                        self._update_preview_and_attribution(meta, staged=False)
+                    else:
+                        self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
             else:
                 # Fallback to cached wallpaper if available
                 fallback = self.cache.get_fallback_wallpaper()
                 if fallback:
-                    self.adapter.set_wallpaper(fallback, mode=mode)
-                    self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
+                    fallback_meta = self.cache.store_local_image(fallback, mode=mode)
+                    if fallback_meta:
+                        self.staged_metadata = fallback_meta
+                        if self.config.preview_before_apply:
+                            self.set_status(f"Online search failed ({err}). Previewing cached wallpaper.", progress=1.0)
+                            self._update_preview_and_attribution(fallback_meta, staged=True)
+                        else:
+                            self.adapter.set_wallpaper(fallback, mode=mode)
+                            self.current_metadata = fallback_meta
+                            self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
+                            self._update_preview_and_attribution(fallback_meta, staged=False)
+                    else:
+                        self.adapter.set_wallpaper(fallback, mode=mode)
+                        self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
                 else:
                     self.set_status(f"Error: {err}", progress=0.0)
 
@@ -750,17 +1002,118 @@ class WallpaperSelectorDialog:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _update_preview_and_attribution(self, meta: WallpaperMetadata) -> None:
+    def on_apply_staged(self) -> None:
+        """Apply the currently staged/previewed wallpaper to desktop & optional lock screen."""
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
+            return
+
+        target_path = Path(target_meta.local_path)
+        if not target_path.exists():
+            self.set_status("Error: Wallpaper file not found on disk.")
+            return
+
+        mode = self.mode_var.get()
+        self.set_busy(True)
+        self.set_status("Applying wallpaper to desktop...", progress=0.8)
+
+        def _worker():
+            success = self.adapter.set_wallpaper(target_path, mode=mode)
+            if success:
+                lock_msg = ""
+                if self.lockscreen_var.get():
+                    lock_ok = self.adapter.set_lockscreen(target_path)
+                    if lock_ok:
+                        lock_msg = " & Lock Screen"
+
+                self.current_metadata = target_meta
+                self.set_status(f"✓ Applied wallpaper{lock_msg}: {target_meta.title} ({mode})", progress=1.0)
+
+                def _ui_update():
+                    if HAS_CUSTOMTKINTER:
+                        self.apply_btn.configure(text="✓ Applied!", fg_color="#059669", state="disabled")
+                    else:
+                        self.apply_btn.config(text="✓ Applied!", state="disabled")
+                self.root.after(0, _ui_update)
+            else:
+                self.set_status("Error: Desktop adapter could not apply wallpaper.")
+            self.set_busy(False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _render_preview_image(self, meta: WallpaperMetadata, mode: Optional[str] = None) -> None:
+        """Render desktop screen-fit and cropping preview mockup for current or staged image."""
+        local_path = Path(meta.local_path)
+        if not local_path.exists():
+            return
+        m = mode or self.mode_var.get()
+        try:
+            preview_img = generate_desktop_preview_image(
+                local_path,
+                mode=m,
+                max_preview_width=540,
+                max_preview_height=165,
+                layout_aware=bool(self.layout_var.get()),
+                draw_mockup_frame=True,
+            )
+            if not preview_img:
+                img = Image.open(local_path)
+                img.thumbnail((540, 165), Image.Resampling.LANCZOS)
+                preview_img = img
+
+            if HAS_CUSTOMTKINTER:
+                ctk_img = ctk.CTkImage(light_image=preview_img, dark_image=preview_img, size=preview_img.size)
+                self.preview_label.configure(image=ctk_img, text="")
+                self.preview_label.image = ctk_img
+            else:
+                from PIL import ImageTk
+                tk_img = ImageTk.PhotoImage(preview_img)
+                self.preview_label.config(image=tk_img, text="")
+                self.preview_label.image = tk_img
+        except Exception:
+            pass
+
+    def _update_preview_and_attribution(self, meta: WallpaperMetadata, staged: bool = False) -> None:
         def _update():
             # Enable actions
+            is_fav = self.favorites_mgr.is_favorite(meta.image_id)
+            rating = self.favorites_mgr.get_rating(meta.image_id)
+
             if HAS_CUSTOMTKINTER:
                 self.retry_btn.configure(state="normal")
                 self.save_btn.configure(state="normal", text="💾 Save Image")
                 self.open_folder_btn.configure(state="disabled")
+                self.fav_btn.configure(
+                    state="normal",
+                    text="❤️ Favorited" if is_fav else "🤍 Favorite",
+                    fg_color="#9d174d" if is_fav else "#374151",
+                )
+                for idx, star_btn in enumerate(self.star_buttons):
+                    is_active = (idx < rating)
+                    star_btn.configure(
+                        state="normal",
+                        fg_color="#ca8a04" if is_active else "#1f2937",
+                        text_color="#fef08a" if is_active else "#9ca3af",
+                    )
+                if staged:
+                    self.apply_btn.configure(state="normal", text="✓ Apply to Desktop", fg_color="#2563eb")
+                else:
+                    self.apply_btn.configure(state="disabled", text="✓ Applied!", fg_color="#059669")
             else:
                 self.retry_btn.config(state="normal")
                 self.save_btn.config(state="normal", text="💾 Save Image")
                 self.open_folder_btn.config(state="disabled")
+                self.fav_btn.config(
+                    state="normal",
+                    text="❤️ Favorited" if is_fav else "🤍 Favorite",
+                )
+                for idx, star_btn in enumerate(self.star_buttons):
+                    is_active = (idx < rating)
+                    star_btn.config(state="normal", bg="#ca8a04" if is_active else "#ddd")
+                if staged:
+                    self.apply_btn.config(state="normal", text="✓ Apply to Desktop")
+                else:
+                    self.apply_btn.config(state="disabled", text="✓ Applied!")
 
             # Update attribution text
             attr_text = meta.attribution_text or f"{meta.title} ({meta.provider})"
@@ -774,24 +1127,8 @@ class WallpaperSelectorDialog:
             else:
                 self.attrib_lbl.config(text=attr_text)
 
-            # Render preview image
-            local_path = Path(meta.local_path)
-            if local_path.exists():
-                try:
-                    img = Image.open(local_path)
-                    # Scale to fit preview box (approx 540x155) maintaining aspect ratio
-                    img.thumbnail((540, 155), Image.Resampling.LANCZOS)
-                    if HAS_CUSTOMTKINTER:
-                        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-                        self.preview_label.configure(image=ctk_img, text="")
-                        self.preview_label.image = ctk_img
-                    else:
-                        from PIL import ImageTk
-                        tk_img = ImageTk.PhotoImage(img)
-                        self.preview_label.config(image=tk_img, text="")
-                        self.preview_label.image = tk_img
-                except Exception:
-                    pass
+            # Render preview image mockup
+            self._render_preview_image(meta)
 
         self.root.after(0, _update)
 

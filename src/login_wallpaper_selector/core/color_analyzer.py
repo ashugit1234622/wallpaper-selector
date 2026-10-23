@@ -3,10 +3,11 @@
 from __future__ import annotations
 import colorsys
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, NamedTuple
 from PIL import Image
+import numpy as np
 
-from .models import ColorPalette
+from .models import ColorPalette, WallpaperMood
 
 
 def rgb_to_hex(r: int, g: int, b: int) -> str:
@@ -146,3 +147,130 @@ def get_palette_keyword(palette: ColorPalette) -> Optional[str]:
     elif palette == ColorPalette.MONOCHROME:
         return "monochrome"
     return None
+
+
+# ── Post-download validation ──────────────────────────────────────────────────
+
+class ImageStats(NamedTuple):
+    """Aggregate perceptual stats for a downloaded image."""
+    mean_brightness: float   # [0, 1]  V channel in HSV, full-image mean
+    mean_saturation: float   # [0, 1]  S channel in HSV, full-image mean
+    dark_pixel_ratio: float  # fraction of pixels with V < 0.30
+    dominant_palette: ColorPalette
+
+
+def compute_image_stats(img: Image.Image) -> ImageStats:
+    """Compute perceptual brightness and saturation statistics for an image."""
+    small = img.resize((128, 72), Image.Resampling.BILINEAR)
+    if small.mode != "RGB":
+        small = small.convert("RGB")
+
+    try:
+        import numpy as np
+        pixels = np.array(small, dtype=np.float32) / 255.0
+        r, g, b = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+        v = np.maximum(np.maximum(r, g), b)
+        s_denom = np.where(v == 0, 1.0, v)
+        s = (v - np.minimum(np.minimum(r, g), b)) / s_denom
+        s = np.where(v == 0, 0.0, s)
+        mean_brightness = float(np.mean(v))
+        mean_saturation = float(np.mean(s))
+        dark_pixel_ratio = float(np.mean(v < 0.30))
+    except ImportError:
+        # Fallback without numpy: iterate pixels
+        pixels_list = list(small.getdata())
+        total = len(pixels_list)
+        v_sum = s_sum = dark_count = 0.0
+        for pr, pg, pb in pixels_list:
+            rv, gv, bv = pr / 255.0, pg / 255.0, pb / 255.0
+            vv = max(rv, gv, bv)
+            sv = (vv - min(rv, gv, bv)) / vv if vv > 0 else 0.0
+            v_sum += vv
+            s_sum += sv
+            if vv < 0.30:
+                dark_count += 1
+        mean_brightness = v_sum / total if total else 0.5
+        mean_saturation = s_sum / total if total else 0.5
+        dark_pixel_ratio = dark_count / total if total else 0.0
+
+    dom_rgb = extract_dominant_color(img)
+    dominant_palette = classify_rgb_to_palette(dom_rgb)
+
+    return ImageStats(
+        mean_brightness=mean_brightness,
+        mean_saturation=mean_saturation,
+        dark_pixel_ratio=dark_pixel_ratio,
+        dominant_palette=dominant_palette,
+    )
+
+
+def compute_image_stats_from_file(image_path: Path) -> Optional["ImageStats"]:
+    """Load an image file and return its perceptual stats, or None on error."""
+    try:
+        with Image.open(image_path) as img:
+            return compute_image_stats(img)
+    except Exception:
+        return None
+
+
+def validate_image_matches_selection(
+    stats: "ImageStats",
+    target_palette: Optional[ColorPalette],
+    target_mood: Optional[WallpaperMood],
+) -> Tuple[bool, str]:
+    """Return (passes, reason) — False means the image should be rejected.
+
+    Strict thresholds applied after download:
+    - Dark mood:       mean_brightness ≤ 0.45  AND dark_pixel_ratio ≥ 0.35
+    - Vibrant mood:   mean_saturation ≥ 0.28  AND mean_brightness ≥ 0.28
+    - Peaceful mood:  mean_brightness ≥ 0.20  (not pitch-black)
+    - Monochrome palette: mean_saturation ≤ 0.25  OR mean_brightness ≤ 0.20
+    - Other palettes:  dominant_palette must match target_palette
+    """
+    # ── Mood gate ──────────────────────────────────────────────────────────
+    if target_mood and target_mood != WallpaperMood.ANY:
+        if target_mood == WallpaperMood.DARK:
+            if stats.mean_brightness > 0.45:
+                return False, (
+                    f"Dark mood: brightness {stats.mean_brightness:.2f} > 0.45"
+                )
+            if stats.dark_pixel_ratio < 0.35:
+                return False, (
+                    f"Dark mood: dark_pixel_ratio {stats.dark_pixel_ratio:.2f} < 0.35"
+                )
+
+        elif target_mood == WallpaperMood.VIBRANT:
+            if stats.mean_saturation < 0.28:
+                return False, (
+                    f"Vibrant mood: saturation {stats.mean_saturation:.2f} < 0.28"
+                )
+            if stats.mean_brightness < 0.28:
+                return False, (
+                    f"Vibrant mood: brightness {stats.mean_brightness:.2f} < 0.28"
+                )
+
+        elif target_mood == WallpaperMood.PEACEFUL:
+            if stats.mean_brightness < 0.20:
+                return False, (
+                    f"Peaceful mood: brightness {stats.mean_brightness:.2f} < 0.20"
+                )
+
+    # ── Palette gate ───────────────────────────────────────────────────────
+    if target_palette and target_palette not in (ColorPalette.ANY, ColorPalette.CUSTOM):
+        if target_palette == ColorPalette.MONOCHROME:
+            # Reject if both saturated AND bright — clearly a colorful image
+            if stats.mean_saturation > 0.25 and stats.mean_brightness > 0.22:
+                return False, (
+                    f"Monochrome: sat={stats.mean_saturation:.2f}>0.25 "
+                    f"AND brightness={stats.mean_brightness:.2f}>0.22"
+                )
+        else:
+            # Hue-based palettes — dominant palette must match
+            if (stats.dominant_palette != target_palette
+                    and stats.dominant_palette != ColorPalette.MONOCHROME):
+                return False, (
+                    f"Palette mismatch: image={stats.dominant_palette.value}, "
+                    f"expected={target_palette.value}"
+                )
+
+    return True, "ok"

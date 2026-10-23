@@ -29,6 +29,8 @@ class AppConfig:
     rotation_enabled: bool = False
     rotation_interval_minutes: int = 180
     rotation_category: str = "Any"
+    seasonal_theme_enabled: bool = False
+    preview_before_apply: bool = True
 
     @classmethod
     def get_config_file_path(cls) -> Path:
@@ -76,6 +78,8 @@ class AppConfig:
                 rotation_enabled=bool(data.get("rotation_enabled", False)),
                 rotation_interval_minutes=int(data.get("rotation_interval_minutes", 180)),
                 rotation_category=str(data.get("rotation_category", "Any")),
+                seasonal_theme_enabled=bool(data.get("seasonal_theme_enabled", False)),
+                preview_before_apply=bool(data.get("preview_before_apply", True)),
             )
         except Exception:
             return cls()
