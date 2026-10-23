@@ -161,3 +161,30 @@ def test_dialog_defaults_to_fill_mode_on_open(monkeypatch):
     assert dialog.config.default_position == WallpaperPosition.FILL.value
 
 
+def test_dialog_responsive_layout_and_scrollable_container(monkeypatch):
+    """Verify that dialog widgets construct a scrollable container and responsive resize handler."""
+    from unittest.mock import MagicMock
+    from login_wallpaper_selector.core.config import AppConfig
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+
+    cfg = AppConfig()
+    dialog = WallpaperSelectorDialog(config=cfg)
+    dialog.root = MagicMock()
+    dialog.attrib_lbl = MagicMock()
+    dialog.status_lbl = MagicMock()
+
+    # Simulate resize event configure
+    event = MagicMock()
+    event.widget = dialog.root
+    event.width = 600
+    dialog._on_window_configure(event)
+
+    # Wraplength should be adjusted for 600px width
+    expected_wrap = 600 - 70
+    dialog.attrib_lbl.configure.assert_called_with(wraplength=expected_wrap)
+    dialog.status_lbl.configure.assert_called_with(wraplength=expected_wrap)
+
+
+

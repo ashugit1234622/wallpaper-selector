@@ -70,8 +70,14 @@ class WallpaperSelectorDialog:
             self.root = tk.Tk()
 
         self.root.title("Choose Your Wallpaper")
-        self.root.geometry("680x810")
-        self.root.minsize(640, 770)
+        
+        # Responsive window sizing based on screen resolution
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        win_w = min(700, max(580, screen_w - 60))
+        win_h = min(820, max(520, screen_h - 100))
+        self.root.geometry(f"{win_w}x{win_h}")
+        self.root.minsize(560, 480)
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
 
@@ -84,9 +90,12 @@ class WallpaperSelectorDialog:
                 pass
 
         # Center on screen
-        self._center_window(680, 810)
+        self._center_window(win_w, win_h)
 
         self._build_widgets()
+
+        # Listen for window resize to adjust responsive wrapping
+        self.root.bind("<Configure>", self._on_window_configure)
 
     def _center_window(self, width: int, height: int) -> None:
         self.root.update_idletasks()
@@ -96,89 +105,133 @@ class WallpaperSelectorDialog:
         y = (screen_h - height) // 2
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
+    def _on_window_configure(self, event) -> None:
+        if hasattr(self, "root") and event.widget == self.root:
+            new_w = event.width
+            wrap = max(380, new_w - 70)
+            if hasattr(self, "attrib_lbl") and self.attrib_lbl:
+                try:
+                    if HAS_CUSTOMTKINTER:
+                        self.attrib_lbl.configure(wraplength=wrap)
+                    else:
+                        self.attrib_lbl.config(wraplength=wrap)
+                except Exception:
+                    pass
+            if hasattr(self, "status_lbl") and self.status_lbl:
+                try:
+                    if HAS_CUSTOMTKINTER:
+                        self.status_lbl.configure(wraplength=wrap)
+                    else:
+                        self.status_lbl.config(wraplength=wrap)
+                except Exception:
+                    pass
+
     def _build_widgets(self) -> None:
-        # Bottom Action Buttons ("Try Another", "Save Image", "Open Folder", "Apply to Desktop", "Done / Close")
-        # Pack bottom frame FIRST so it is firmly anchored to the bottom edge and never clipped
+        # Bottom Action Bar: permanently docked at bottom edge of root so actions are ALWAYS accessible
         bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        bottom_frame.pack(side="bottom", fill="x", padx=24, pady=(10, 20))
+        bottom_frame.pack(side="bottom", fill="x", padx=16, pady=(6, 12))
+
+        # Responsive 5-column grid for action buttons - stretches evenly across any width without collision
+        bottom_frame.columnconfigure(0, weight=1)
+        bottom_frame.columnconfigure(1, weight=1)
+        bottom_frame.columnconfigure(2, weight=1)
+        bottom_frame.columnconfigure(3, weight=2)
+        bottom_frame.columnconfigure(4, weight=1)
 
         if HAS_CUSTOMTKINTER:
             self.retry_btn = ctk.CTkButton(
                 bottom_frame,
                 text="🔄 Try Another",
-                width=115,
-                height=38,
-                font=ctk.CTkFont(size=13, weight="bold"),
+                height=36,
+                font=ctk.CTkFont(size=12, weight="bold"),
                 state="disabled",
                 fg_color="#4b5563",
                 hover_color="#374151",
                 command=self.on_retry,
             )
-            self.retry_btn.pack(side="left", padx=(0, 6))
+            self.retry_btn.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
 
             self.save_btn = ctk.CTkButton(
                 bottom_frame,
                 text="💾 Save Image",
-                width=115,
-                height=38,
-                font=ctk.CTkFont(size=13, weight="bold"),
+                height=36,
+                font=ctk.CTkFont(size=12, weight="bold"),
                 state="disabled",
                 fg_color="#059669",
                 hover_color="#047857",
                 command=self.on_save_wallpaper,
             )
-            self.save_btn.pack(side="left", padx=6)
+            self.save_btn.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
 
             self.open_folder_btn = ctk.CTkButton(
                 bottom_frame,
                 text="📂 Open Folder",
-                width=115,
-                height=38,
-                font=ctk.CTkFont(size=13, weight="bold"),
+                height=36,
+                font=ctk.CTkFont(size=12, weight="bold"),
                 state="disabled",
                 fg_color="#374151",
                 hover_color="#1f2937",
                 command=self.on_open_category_folder,
             )
-            self.open_folder_btn.pack(side="left", padx=6)
-
-            self.close_btn = ctk.CTkButton(
-                bottom_frame,
-                text="Done / Close",
-                width=105,
-                height=38,
-                font=ctk.CTkFont(size=13, weight="bold"),
-                command=self.on_close,
-            )
-            self.close_btn.pack(side="right")
+            self.open_folder_btn.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
 
             self.apply_btn = ctk.CTkButton(
                 bottom_frame,
                 text="✓ Apply to Desktop",
-                width=145,
-                height=38,
-                font=ctk.CTkFont(size=13, weight="bold"),
+                height=36,
+                font=ctk.CTkFont(size=12, weight="bold"),
                 state="disabled",
                 fg_color="#2563eb",
                 hover_color="#1d4ed8",
                 command=self.on_apply_staged,
             )
-            self.apply_btn.pack(side="right", padx=6)
+            self.apply_btn.grid(row=0, column=3, padx=3, pady=2, sticky="ew")
+
+            self.close_btn = ctk.CTkButton(
+                bottom_frame,
+                text="Done / Close",
+                height=36,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=self.on_close,
+            )
+            self.close_btn.grid(row=0, column=4, padx=3, pady=2, sticky="ew")
         else:
             self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
-            self.retry_btn.pack(side="left", padx=4)
+            self.retry_btn.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
             self.save_btn = tk.Button(bottom_frame, text="💾 Save Image", state="disabled", command=self.on_save_wallpaper)
-            self.save_btn.pack(side="left", padx=4)
+            self.save_btn.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
             self.open_folder_btn = tk.Button(bottom_frame, text="📂 Open Folder", state="disabled", command=self.on_open_category_folder)
-            self.open_folder_btn.pack(side="left", padx=4)
-            self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
-            self.close_btn.pack(side="right")
+            self.open_folder_btn.grid(row=0, column=2, padx=2, pady=2, sticky="ew")
             self.apply_btn = tk.Button(bottom_frame, text="✓ Apply to Desktop", state="disabled", command=self.on_apply_staged)
-            self.apply_btn.pack(side="right", padx=4)
+            self.apply_btn.grid(row=0, column=3, padx=2, pady=2, sticky="ew")
+            self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
+            self.close_btn.grid(row=0, column=4, padx=2, pady=2, sticky="ew")
+
+        # Scrollable container for the main content area so nothing is EVER clipped or crammed on any screen size
+        if HAS_CUSTOMTKINTER:
+            self.scroll_container = ctk.CTkScrollableFrame(self.root, fg_color="transparent")
+            self.scroll_container.pack(fill="both", expand=True, padx=4, pady=(4, 0))
+            main_parent = self.scroll_container
+        else:
+            canvas = tk.Canvas(self.root, borderwidth=0, highlightthickness=0)
+            scrollbar = tk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+            self.scrollable_inner_frame = tk.Frame(canvas)
+            self.scrollable_inner_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            canvas_window = canvas.create_window((0, 0), window=self.scrollable_inner_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+
+            scrollbar.pack(side="right", fill="y")
+            canvas.pack(side="left", fill="both", expand=True)
+            self.scroll_container = canvas
+            main_parent = self.scrollable_inner_frame
 
         # Header container
-        header_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        header_frame.pack(fill="x", padx=24, pady=(12, 4))
+        header_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        header_frame.pack(fill="x", padx=16, pady=(6, 2))
 
         top_title_row = ctk.CTkFrame(header_frame, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(header_frame)
         top_title_row.pack(fill="x")
@@ -187,10 +240,10 @@ class WallpaperSelectorDialog:
             ctk.CTkLabel(
                 top_title_row,
                 text="Desktop Wallpaper Selector",
-                font=ctk.CTkFont(size=22, weight="bold"),
+                font=ctk.CTkFont(size=20, weight="bold"),
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(top_title_row, text="Desktop Wallpaper Selector", font=("Helvetica", 16, "bold"))
+            else tk.Label(top_title_row, text="Desktop Wallpaper Selector", font=("Helvetica", 15, "bold"))
         )
         title_lbl.pack(side="left")
 
@@ -198,7 +251,7 @@ class WallpaperSelectorDialog:
             ctk.CTkButton(
                 top_title_row,
                 text="🔄 Updates",
-                width=90,
+                width=85,
                 height=26,
                 font=ctk.CTkFont(size=11),
                 fg_color="#1f2937",
@@ -214,17 +267,17 @@ class WallpaperSelectorDialog:
             ctk.CTkLabel(
                 header_frame,
                 text="Select a category for your session background:",
-                font=ctk.CTkFont(size=13),
+                font=ctk.CTkFont(size=12),
                 text_color="gray",
             )
             if HAS_CUSTOMTKINTER
             else tk.Label(header_frame, text="Select a category for your session background:", fg="gray")
         )
-        subtitle_lbl.pack(anchor="w", pady=(2, 0))
+        subtitle_lbl.pack(anchor="w", pady=(1, 0))
 
-        # Category buttons container (Grid of 5 options)
-        btn_grid = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        btn_grid.pack(fill="x", padx=24, pady=(6, 8))
+        # Category buttons container: 2 rows of 3 columns - compact, beautiful & responsive
+        btn_grid = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        btn_grid.pack(fill="x", padx=16, pady=(4, 6))
 
         categories = [
             (WallpaperCategory.SPACE, "🚀 Space", "#1e3a8a"),
@@ -237,39 +290,39 @@ class WallpaperSelectorDialog:
 
         self.cat_buttons = {}
         for idx, (cat, label_text, color) in enumerate(categories):
-            row = idx // 2
-            col = idx % 2
-            colspan = 1
+            row = idx // 3
+            col = idx % 3
 
             if HAS_CUSTOMTKINTER:
                 btn = ctk.CTkButton(
                     btn_grid,
                     text=label_text,
-                    font=ctk.CTkFont(size=14, weight="bold"),
-                    height=42,
+                    font=ctk.CTkFont(size=13, weight="bold"),
+                    height=36,
                     command=lambda c=cat: self.on_select_category(c),
                 )
-                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=4, sticky="ew")
+                btn.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
             else:
                 btn = tk.Button(
                     btn_grid,
                     text=label_text,
-                    font=("Helvetica", 11, "bold"),
-                    height=2,
+                    font=("Helvetica", 10, "bold"),
+                    height=1,
                     command=lambda c=cat: self.on_select_category(c),
                 )
-                btn.grid(row=row, column=col, columnspan=colspan, padx=6, pady=4, sticky="ew")
+                btn.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
             self.cat_buttons[cat] = btn
 
         btn_grid.columnconfigure(0, weight=1)
         btn_grid.columnconfigure(1, weight=1)
+        btn_grid.columnconfigure(2, weight=1)
 
         # Custom Keyword Search Bar & Suggestions Container
-        search_container = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        search_container.pack(fill="x", padx=24, pady=(2, 6))
+        search_container = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        search_container.pack(fill="x", padx=16, pady=(2, 4))
 
         search_row = ctk.CTkFrame(search_container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(search_container)
-        search_row.pack(fill="x", pady=(0, 3))
+        search_row.pack(fill="x", pady=(0, 2))
 
         if HAS_CUSTOMTKINTER:
             self.search_entry = ctk.CTkEntry(
@@ -321,8 +374,8 @@ class WallpaperSelectorDialog:
         self._populate_suggestion_chips()
 
         # Color Palette Swatch Bar
-        color_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        color_frame.pack(fill="x", padx=24, pady=(2, 6))
+        color_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        color_frame.pack(fill="x", padx=16, pady=(2, 4))
 
         color_lbl = (
             ctk.CTkLabel(color_frame, text="🎨 Color:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -367,8 +420,8 @@ class WallpaperSelectorDialog:
             self.color_chips[pal] = chip
 
         # Mood Selector Bar ("What's your mood?")
-        mood_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        mood_frame.pack(fill="x", padx=24, pady=(2, 6))
+        mood_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        mood_frame.pack(fill="x", padx=16, pady=(2, 4))
 
         mood_lbl = (
             ctk.CTkLabel(mood_frame, text="🎭 Mood:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -413,15 +466,15 @@ class WallpaperSelectorDialog:
             self.mood_chips[mood] = chip
 
         # Settings row: Mode selection (Fill / Fit)
-        settings_frame = ctk.CTkFrame(self.root) if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        settings_frame.pack(fill="x", padx=24, pady=(5, 10))
+        settings_frame = ctk.CTkFrame(main_parent) if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        settings_frame.pack(fill="x", padx=16, pady=(4, 6))
 
         mode_lbl = (
             ctk.CTkLabel(settings_frame, text="Display Mode:", font=ctk.CTkFont(size=12, weight="bold"))
             if HAS_CUSTOMTKINTER
             else tk.Label(settings_frame, text="Display Mode:")
         )
-        mode_lbl.pack(side="left", padx=12, pady=8)
+        mode_lbl.pack(side="left", padx=10, pady=6)
 
         default_mode = WallpaperPosition.FILL.value
         self.config.default_position = default_mode
@@ -435,7 +488,7 @@ class WallpaperSelectorDialog:
                 command=self.on_mode_change,
             )
             self.mode_selector.set(default_mode)
-            self.mode_selector.pack(side="left", padx=10, pady=8)
+            self.mode_selector.pack(side="left", padx=8, pady=6)
 
             self.lockscreen_var = ctk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
             self.lockscreen_chk = ctk.CTkCheckBox(
@@ -445,7 +498,7 @@ class WallpaperSelectorDialog:
                 font=ctk.CTkFont(size=12),
                 command=self.on_lockscreen_toggle,
             )
-            self.lockscreen_chk.pack(side="right", padx=10, pady=8)
+            self.lockscreen_chk.pack(side="right", padx=8, pady=6)
 
             self.layout_var = ctk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
             self.layout_chk = ctk.CTkCheckBox(
@@ -455,7 +508,7 @@ class WallpaperSelectorDialog:
                 font=ctk.CTkFont(size=12),
                 command=self.on_layout_toggle,
             )
-            self.layout_chk.pack(side="right", padx=6, pady=8)
+            self.layout_chk.pack(side="right", padx=6, pady=6)
 
             season_icon, season_name = get_season_display(get_current_season())
             self.seasonal_var = ctk.BooleanVar(value=bool(getattr(self.config, "seasonal_theme_enabled", False)))
@@ -466,13 +519,13 @@ class WallpaperSelectorDialog:
                 font=ctk.CTkFont(size=12, weight="bold"),
                 command=self.on_seasonal_toggle,
             )
-            self.seasonal_chk.pack(side="right", padx=6, pady=8)
+            self.seasonal_chk.pack(side="right", padx=6, pady=6)
         else:
             self.mode_var = tk.StringVar(value=default_mode)
             self.mode_var.set(default_mode)
             for m in [WallpaperPosition.FILL.value, WallpaperPosition.FIT.value]:
                 rb = tk.Radiobutton(settings_frame, text=m, value=m, variable=self.mode_var, command=self.on_mode_change)
-                rb.pack(side="left", padx=5)
+                rb.pack(side="left", padx=4)
 
             self.lockscreen_var = tk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
             self.lockscreen_chk = tk.Checkbutton(
@@ -481,7 +534,7 @@ class WallpaperSelectorDialog:
                 variable=self.lockscreen_var,
                 command=self.on_lockscreen_toggle,
             )
-            self.lockscreen_chk.pack(side="right", padx=10, pady=8)
+            self.lockscreen_chk.pack(side="right", padx=8, pady=6)
 
             self.layout_var = tk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
             self.layout_chk = tk.Checkbutton(
@@ -490,7 +543,7 @@ class WallpaperSelectorDialog:
                 variable=self.layout_var,
                 command=self.on_layout_toggle,
             )
-            self.layout_chk.pack(side="right", padx=6, pady=8)
+            self.layout_chk.pack(side="right", padx=6, pady=6)
 
             season_icon, season_name = get_season_display(get_current_season())
             self.seasonal_var = tk.BooleanVar(value=bool(getattr(self.config, "seasonal_theme_enabled", False)))
@@ -500,11 +553,11 @@ class WallpaperSelectorDialog:
                 variable=self.seasonal_var,
                 command=self.on_seasonal_toggle,
             )
-            self.seasonal_chk.pack(side="right", padx=6, pady=8)
+            self.seasonal_chk.pack(side="right", padx=6, pady=6)
 
         # Auto-Rotation Controls Bar
-        rotate_frame = ctk.CTkFrame(self.root) if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        rotate_frame.pack(fill="x", padx=24, pady=(2, 8))
+        rotate_frame = ctk.CTkFrame(main_parent) if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        rotate_frame.pack(fill="x", padx=16, pady=(2, 6))
 
         self.rotate_var = ctk.BooleanVar(value=bool(getattr(self.config, "rotation_enabled", False)))
         if HAS_CUSTOMTKINTER:
@@ -515,7 +568,7 @@ class WallpaperSelectorDialog:
                 font=ctk.CTkFont(size=12, weight="bold"),
                 command=self.on_rotate_toggle,
             )
-            self.rotate_chk.pack(side="left", padx=12, pady=6)
+            self.rotate_chk.pack(side="left", padx=10, pady=6)
         else:
             self.rotate_chk = tk.Checkbutton(
                 rotate_frame,
@@ -523,7 +576,7 @@ class WallpaperSelectorDialog:
                 variable=self.rotate_var,
                 command=self.on_rotate_toggle,
             )
-            self.rotate_chk.pack(side="left", padx=12, pady=6)
+            self.rotate_chk.pack(side="left", padx=10, pady=6)
 
         curr_min = getattr(self.config, "rotation_interval_minutes", 180)
         curr_str = "30m" if curr_min == 30 else ("1h" if curr_min == 60 else ("daily" if curr_min >= 1440 else "3h"))
@@ -541,14 +594,14 @@ class WallpaperSelectorDialog:
             self.rotate_now_btn = ctk.CTkButton(
                 rotate_frame,
                 text="🔄 Rotate Now",
-                width=110,
+                width=105,
                 height=28,
                 font=ctk.CTkFont(size=12, weight="bold"),
                 fg_color="#4f46e5",
                 hover_color="#4338ca",
                 command=self.on_rotate_now,
             )
-            self.rotate_now_btn.pack(side="right", padx=12, pady=6)
+            self.rotate_now_btn.pack(side="right", padx=10, pady=6)
         else:
             self.interval_var = tk.StringVar(value=curr_str)
             for iv_label in ["30m", "1h", "3h", "daily"]:
@@ -560,11 +613,11 @@ class WallpaperSelectorDialog:
                 text="🔄 Rotate Now",
                 command=self.on_rotate_now,
             )
-            self.rotate_now_btn.pack(side="right", padx=12, pady=6)
+            self.rotate_now_btn.pack(side="right", padx=10, pady=6)
 
         # Preview Container
-        self.preview_frame = ctk.CTkFrame(self.root, height=170) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=170, bg="black")
-        self.preview_frame.pack(fill="x", padx=24, pady=8)
+        self.preview_frame = ctk.CTkFrame(main_parent, height=155) if HAS_CUSTOMTKINTER else tk.Frame(main_parent, height=155, bg="black")
+        self.preview_frame.pack(fill="x", padx=16, pady=(4, 4))
         self.preview_frame.pack_propagate(False)
 
         self.preview_label = (
@@ -574,48 +627,15 @@ class WallpaperSelectorDialog:
         )
         self.preview_label.pack(expand=True, fill="both")
 
-        # Status & Progress Area
-        status_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        status_frame.pack(fill="x", padx=24, pady=4)
-
-        self.status_lbl = (
-            ctk.CTkLabel(status_frame, text="Ready. Click any category above.", font=ctk.CTkFont(size=12))
-            if HAS_CUSTOMTKINTER
-            else tk.Label(status_frame, text="Ready.")
-        )
-        self.status_lbl.pack(anchor="w")
-
-        if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(status_frame)
-            self.progress_bar.pack(fill="x", pady=4)
-            self.progress_bar.set(0)
-        else:
-            self.progress_bar = None
-
-        # Attribution display
-        self.attrib_lbl = (
-            ctk.CTkLabel(
-                self.root,
-                text="",
-                font=ctk.CTkFont(size=11),
-                text_color="gray",
-                wraplength=560,
-                justify="left",
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Label(self.root, text="", fg="gray", wraplength=560, justify="left")
-        )
-        self.attrib_lbl.pack(anchor="w", padx=24, pady=(2, 6))
-
-        # Favorite and Star Rating Toolbar
-        fav_rating_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        fav_rating_frame.pack(fill="x", padx=24, pady=(2, 6))
+        # Favorite and Star Rating Toolbar - Positioned directly below preview so it is NEVER cramped or cut off
+        fav_rating_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        fav_rating_frame.pack(fill="x", padx=16, pady=(3, 3))
 
         if HAS_CUSTOMTKINTER:
             self.fav_btn = ctk.CTkButton(
                 fav_rating_frame,
                 text="🤍 Favorite",
-                width=115,
+                width=110,
                 height=30,
                 font=ctk.CTkFont(size=12, weight="bold"),
                 fg_color="#374151",
@@ -626,7 +646,7 @@ class WallpaperSelectorDialog:
             self.fav_btn.pack(side="left")
 
             rating_lbl = ctk.CTkLabel(fav_rating_frame, text="Rating:", font=ctk.CTkFont(size=12, weight="bold"))
-            rating_lbl.pack(side="left", padx=(16, 6))
+            rating_lbl.pack(side="left", padx=(14, 6))
 
             self.star_buttons = []
             for s in range(1, 6):
@@ -656,6 +676,39 @@ class WallpaperSelectorDialog:
                 s_btn = tk.Button(fav_rating_frame, text="★", state="disabled", command=lambda star=s: self.on_set_rating(star))
                 s_btn.pack(side="left", padx=1)
                 self.star_buttons.append(s_btn)
+
+        # Status & Progress Area
+        status_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
+        status_frame.pack(fill="x", padx=16, pady=(2, 2))
+
+        self.status_lbl = (
+            ctk.CTkLabel(status_frame, text="Ready. Click any category above.", font=ctk.CTkFont(size=12), wraplength=580, justify="left")
+            if HAS_CUSTOMTKINTER
+            else tk.Label(status_frame, text="Ready.", wraplength=580, justify="left")
+        )
+        self.status_lbl.pack(anchor="w")
+
+        if HAS_CUSTOMTKINTER:
+            self.progress_bar = ctk.CTkProgressBar(status_frame)
+            self.progress_bar.pack(fill="x", pady=2)
+            self.progress_bar.set(0)
+        else:
+            self.progress_bar = None
+
+        # Attribution display
+        self.attrib_lbl = (
+            ctk.CTkLabel(
+                main_parent,
+                text="",
+                font=ctk.CTkFont(size=11),
+                text_color="gray",
+                wraplength=580,
+                justify="left",
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Label(main_parent, text="", fg="gray", wraplength=580, justify="left")
+        )
+        self.attrib_lbl.pack(anchor="w", padx=16, pady=(2, 8))
 
     def set_status(self, text: str, progress: Optional[float] = None) -> None:
         """Update status label and optional progress bar from any thread."""
@@ -1150,17 +1203,26 @@ class WallpaperSelectorDialog:
             return
         m = mode or self.mode_var.get()
         try:
+            target_w = 540
+            if hasattr(self, "root") and hasattr(self.root, "winfo_width"):
+                try:
+                    cur_w = self.root.winfo_width()
+                    if cur_w > 200:
+                        target_w = min(580, max(400, cur_w - 70))
+                except Exception:
+                    target_w = 540
+
             preview_img = generate_desktop_preview_image(
                 local_path,
                 mode=m,
-                max_preview_width=540,
-                max_preview_height=165,
+                max_preview_width=target_w,
+                max_preview_height=150,
                 layout_aware=bool(self.layout_var.get()),
                 draw_mockup_frame=True,
             )
             if not preview_img:
                 img = Image.open(local_path)
-                img.thumbnail((540, 165), Image.Resampling.LANCZOS)
+                img.thumbnail((target_w, 150), Image.Resampling.LANCZOS)
                 preview_img = img
 
             if HAS_CUSTOMTKINTER:
