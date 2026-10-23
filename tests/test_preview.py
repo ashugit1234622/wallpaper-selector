@@ -187,4 +187,50 @@ def test_dialog_responsive_layout_and_scrollable_container(monkeypatch):
     dialog.status_lbl.configure.assert_called_with(wraplength=expected_wrap)
 
 
+def test_dialog_separate_lockscreen_button(tmp_path, monkeypatch):
+    """Verify that lockscreen is applied independently via on_apply_lockscreen."""
+    from unittest.mock import MagicMock
+    from login_wallpaper_selector.core.config import AppConfig
+    from login_wallpaper_selector.core.models import WallpaperMetadata, WallpaperPosition
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+
+    cfg = AppConfig()
+    dialog = WallpaperSelectorDialog(config=cfg)
+    dialog.adapter = MagicMock()
+    dialog.adapter.set_lockscreen.return_value = True
+    dialog.root = MagicMock()
+    dialog.set_status = MagicMock()
+    dialog.set_busy = MagicMock()
+    dialog.lockscreen_btn = MagicMock()
+
+    test_file = create_test_pattern_image(tmp_path / "lock_test.jpg", 1920, 1080)
+    meta = WallpaperMetadata(
+        image_id="lock-1",
+        category="Art",
+        provider="Wallhaven",
+        source_url="https://example.com",
+        download_url="https://example.com",
+        local_path=str(test_file),
+        sha256="123",
+        title="Artistic Lock Screen",
+        creator="Artist",
+        license="CC",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="",
+        width=1920,
+        height=1080,
+        aspect_ratio=1.778,
+        mode=WallpaperPosition.FILL.value,
+    )
+    dialog.staged_metadata = meta
+
+    dialog.on_apply_lockscreen()
+
+    dialog.adapter.set_lockscreen.assert_called_once_with(Path(test_file))
+
+
+
 

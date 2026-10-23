@@ -515,15 +515,7 @@ class WallpaperSelectorDialog:
             self.mode_selector.set(default_mode)
             self.mode_selector.pack(side="left", padx=8, pady=6)
 
-            self.lockscreen_var = ctk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
-            self.lockscreen_chk = ctk.CTkCheckBox(
-                settings_frame,
-                text="Also set Lock Screen",
-                variable=self.lockscreen_var,
-                font=ctk.CTkFont(size=12),
-                command=self.on_lockscreen_toggle,
-            )
-            self.lockscreen_chk.pack(side="right", padx=8, pady=6)
+            self.lockscreen_var = ctk.BooleanVar(value=False)
 
             self.layout_var = ctk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
             self.layout_chk = ctk.CTkCheckBox(
@@ -552,14 +544,7 @@ class WallpaperSelectorDialog:
                 rb = tk.Radiobutton(settings_frame, text=m, value=m, variable=self.mode_var, command=self.on_mode_change)
                 rb.pack(side="left", padx=4)
 
-            self.lockscreen_var = tk.BooleanVar(value=bool(getattr(self.config, "also_set_lockscreen", False)))
-            self.lockscreen_chk = tk.Checkbutton(
-                settings_frame,
-                text="Also set Lock Screen",
-                variable=self.lockscreen_var,
-                command=self.on_lockscreen_toggle,
-            )
-            self.lockscreen_chk.pack(side="right", padx=8, pady=6)
+            self.lockscreen_var = tk.BooleanVar(value=False)
 
             self.layout_var = tk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
             self.layout_chk = tk.Checkbutton(
@@ -689,6 +674,18 @@ class WallpaperSelectorDialog:
                 )
                 s_btn.pack(side="left", padx=2)
                 self.star_buttons.append(s_btn)
+
+            self.lockscreen_btn = ctk.CTkButton(
+                fav_rating_frame,
+                text="🔒 Set as Lock Screen",
+                height=30,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#4f46e5",
+                hover_color="#4338ca",
+                state="disabled",
+                command=self.on_apply_lockscreen,
+            )
+            self.lockscreen_btn.pack(side="right")
         else:
             self.fav_btn = tk.Button(fav_rating_frame, text="🤍 Favorite", state="disabled", command=self.on_toggle_favorite)
             self.fav_btn.pack(side="left")
@@ -701,6 +698,14 @@ class WallpaperSelectorDialog:
                 s_btn = tk.Button(fav_rating_frame, text="★", state="disabled", command=lambda star=s: self.on_set_rating(star))
                 s_btn.pack(side="left", padx=1)
                 self.star_buttons.append(s_btn)
+
+            self.lockscreen_btn = tk.Button(
+                fav_rating_frame,
+                text="🔒 Set as Lock Screen",
+                state="disabled",
+                command=self.on_apply_lockscreen,
+            )
+            self.lockscreen_btn.pack(side="right")
 
         # Status & Progress Area
         status_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
@@ -796,6 +801,8 @@ class WallpaperSelectorDialog:
                     sb.configure(state=action_state) if HAS_CUSTOMTKINTER else sb.config(state=action_state)
                 if self.staged_metadata and self.staged_metadata != self.current_metadata:
                     self.apply_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_btn.config(state=action_state)
+                if hasattr(self, "lockscreen_btn"):
+                    self.lockscreen_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.lockscreen_btn.config(state=action_state)
         self.root.after(0, _update)
 
     def on_mode_change(self, *args) -> None:
@@ -816,15 +823,40 @@ class WallpaperSelectorDialog:
                     self.adapter.set_wallpaper(Path(target_meta.local_path), mode=new_mode)
                     self.set_status(f"Updated display mode to {new_mode}.")
 
+    def on_apply_lockscreen(self) -> None:
+        """Apply the currently staged/previewed wallpaper to Windows Lock Screen."""
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
+            self.set_status("No wallpaper available to set as Lock Screen.")
+            return
+
+        target_path = Path(target_meta.local_path)
+        if not target_path.exists():
+            self.set_status("Error: Wallpaper file not found on disk.")
+            return
+
+        self.set_busy(True)
+        self.set_status("Applying wallpaper to Lock Screen...", progress=0.8)
+
+        def _worker():
+            success = self.adapter.set_lockscreen(target_path)
+            if success:
+                self.set_status(f"✓ Applied to Lock Screen: {target_meta.title}", progress=1.0)
+                def _ui():
+                    if HAS_CUSTOMTKINTER:
+                        self.lockscreen_btn.configure(text="✓ Lock Screen Set!", fg_color="#059669", state="disabled")
+                    else:
+                        self.lockscreen_btn.config(text="✓ Lock Screen Set!", state="disabled")
+                self.root.after(0, _ui)
+            else:
+                self.set_status("Error: Desktop adapter could not apply Lock Screen.")
+            self.set_busy(False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def on_lockscreen_toggle(self) -> None:
-        enabled = self.lockscreen_var.get()
-        self.config.also_set_lockscreen = enabled
-        self.config.save()
-        target_meta = self.current_metadata or self.staged_metadata
-        if enabled and target_meta and Path(target_meta.local_path).exists():
-            ok = self.adapter.set_lockscreen(Path(target_meta.local_path))
-            if ok:
-                self.set_status("✓ Applied current wallpaper to Lock Screen.")
+        """Compatibility alias for lock screen setting."""
+        self.on_apply_lockscreen()
 
     def on_layout_toggle(self) -> None:
         """Handle toggling of desktop layout awareness."""
@@ -1313,14 +1345,8 @@ class WallpaperSelectorDialog:
         def _worker():
             success = self.adapter.set_wallpaper(target_path, mode=mode)
             if success:
-                lock_msg = ""
-                if self.lockscreen_var.get():
-                    lock_ok = self.adapter.set_lockscreen(target_path)
-                    if lock_ok:
-                        lock_msg = " & Lock Screen"
-
                 self.current_metadata = target_meta
-                self.set_status(f"✓ Applied wallpaper{lock_msg}: {target_meta.title} ({mode})", progress=1.0)
+                self.set_status(f"✓ Applied wallpaper: {target_meta.title} ({mode})", progress=1.0)
 
                 def _ui_update():
                     if HAS_CUSTOMTKINTER:
@@ -1397,6 +1423,12 @@ class WallpaperSelectorDialog:
                         fg_color="#ca8a04" if is_active else "#1f2937",
                         text_color="#fef08a" if is_active else "#9ca3af",
                     )
+                if hasattr(self, "lockscreen_btn"):
+                    self.lockscreen_btn.configure(
+                        state="normal",
+                        text="🔒 Set as Lock Screen",
+                        fg_color="#4f46e5",
+                    )
                 if staged:
                     self.apply_btn.configure(state="normal", text="✓ Apply to Desktop", fg_color="#2563eb")
                 else:
@@ -1412,6 +1444,11 @@ class WallpaperSelectorDialog:
                 for idx, star_btn in enumerate(self.star_buttons):
                     is_active = (idx < rating)
                     star_btn.config(state="normal", bg="#ca8a04" if is_active else "#ddd")
+                if hasattr(self, "lockscreen_btn"):
+                    self.lockscreen_btn.config(
+                        state="normal",
+                        text="🔒 Set as Lock Screen",
+                    )
                 if staged:
                     self.apply_btn.config(state="normal", text="✓ Apply to Desktop")
                 else:
