@@ -14,7 +14,7 @@ from .artic import ArtInstituteChicagoProvider
 from .wallhaven import WallhavenProvider
 from .the_met import TheMetImageProvider
 from .bing import BingImageProvider
-from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata, ColorPalette, WallpaperMood
+from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata, ColorPalette, WallpaperMood, WallpaperPosition
 from ..core.seasonal import Season, get_current_season, augment_query_with_season, get_season_display
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
@@ -29,6 +29,8 @@ from ..core.color_analyzer import (
     get_palette_keyword,
 )
 from ..core.mood_matcher import augment_query_with_mood
+from ..core.keyword_expander import generate_keyword_query_for_tier, normalize_keyword
+from ..core.ranking import rank_wallpaper_candidates
 
 
 RETRY_QUERY_TIERS: dict[WallpaperCategory, dict[int, List[str]]] = {
@@ -122,6 +124,7 @@ class ProviderRouter:
         category: WallpaperCategory,
         color: Optional[ColorPalette] = None,
         mood: Optional[WallpaperMood] = None,
+        keyword: Optional[str] = None,
     ) -> List[BaseImageProvider]:
         """Ordered list of providers (primary followed by secondary and fallbacks)."""
         if category == WallpaperCategory.SPACE:
@@ -135,9 +138,13 @@ class ProviderRouter:
         else:
             providers = []
 
+        # If a specific keyword is requested, deprioritize or omit fixed-archive providers (Bing)
+        if keyword and keyword.strip() and self.bing in providers:
+            providers = [p for p in providers if p != self.bing]
+
         # When Dark or Monochrome is active, prioritize search-capable providers
         # and move Bing (which only has bright daylight daily photos) to the end.
-        if (mood == WallpaperMood.DARK or color == ColorPalette.MONOCHROME) and self.bing in providers:
+        elif (mood == WallpaperMood.DARK or color == ColorPalette.MONOCHROME) and self.bing in providers:
             providers = [p for p in providers if p != self.bing] + [self.bing]
 
         return providers
@@ -152,12 +159,16 @@ class ProviderRouter:
         season: Optional[Season] = None,
         query: Optional[str] = None,
         tried_sources: Optional[Dict[str, Any]] = None,
+        keyword: Optional[str] = None,
     ) -> List[WallpaperCandidate]:
         """Fetch candidate images for a category, interleaving results across available providers."""
         try:
-            providers = self.get_providers_for_category(category, color=color, mood=mood)
+            providers = self.get_providers_for_category(category, color=color, mood=mood, keyword=keyword)
         except TypeError:
-            providers = self.get_providers_for_category(category)
+            try:
+                providers = self.get_providers_for_category(category, color=color, mood=mood)
+            except TypeError:
+                providers = self.get_providers_for_category(category)
         if not providers:
             return []
 
@@ -283,7 +294,7 @@ class ProviderRouter:
     def acquire_wallpaper_for_category(
         self,
         category: WallpaperCategory,
-        mode: str,
+        mode: str = WallpaperPosition.FILL.value,
         progress_callback: Optional[callable] = None,
         status_callback: Optional[callable] = None,
         max_retries: Optional[int] = None,
@@ -291,12 +302,12 @@ class ProviderRouter:
         custom_color_hex: Optional[str] = None,
         mood: Optional[WallpaperMood] = None,
         season: Optional[Season] = None,
+        keyword: Optional[str] = None,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
         """Fetch, download, validate, cache, and record a wallpaper for an online category with retries.
         
-        Tries across available repositories with progressive adaptive thresholds.
-        If strict validation rejects all candidates across attempts, the best-scoring candidate
-        closest to the target criteria is delivered to guarantee zero search failures.
+        Supports both standard category discovery and Strict Keyword Mode.
+        Enforces a global network request budget and timeout.
 
         Returns:
             Tuple of (WallpaperMetadata, error_message)
@@ -307,23 +318,58 @@ class ProviderRouter:
         tried_sources: Dict[str, Any] = {}
         best_candidate_info: Optional[Tuple[WallpaperCandidate, Path, float]] = None
 
-        for attempt in range(1, total_attempts + 1):
-            tier_query = get_retry_tier_query(category, attempt, mood=mood, color=color)
-            if mood and mood != WallpaperMood.ANY and attempt <= 3:
-                tier_query = augment_query_with_mood(tier_query, mood, category)
-            if active_season and attempt <= 3:
-                tier_query = augment_query_with_season(tier_query, active_season, category)
+        is_keyword_search = bool(keyword and keyword.strip())
+        clean_kw = normalize_keyword(keyword) if is_keyword_search else ""
 
-            if status_callback:
-                mood_info = f" [{mood.value}]" if mood and mood != WallpaperMood.ANY else ""
-                color_info = f" ({color.value})" if color and color != ColorPalette.ANY else ""
-                season_info = f" ({get_season_display(active_season)[0]} {active_season.value})" if active_season else ""
-                retry_strategy = f" [Tier {min(5, attempt)}: '{tier_query}']" if attempt > 1 else ""
-                status_callback(
-                    f"Attempt {attempt}/{total_attempts}{retry_strategy}: Finding {category.value}{season_info}{mood_info}{color_info} wallpaper...",
-                    attempt,
-                    total_attempts,
+        MAX_GLOBAL_REQUESTS = 12
+        GLOBAL_TIMEOUT_SECONDS = 25.0
+        start_time = time.time()
+        total_requests = 0
+
+        for attempt in range(1, total_attempts + 1):
+            if time.time() - start_time > GLOBAL_TIMEOUT_SECONDS:
+                break
+            if total_requests >= MAX_GLOBAL_REQUESTS:
+                break
+
+            if is_keyword_search:
+                tier_query = generate_keyword_query_for_tier(
+                    keyword=clean_kw,
+                    category=category,
+                    attempt=attempt,
+                    provider_style="general",
+                    mood=mood,
+                    color=color,
                 )
+                if status_callback:
+                    if attempt == 1:
+                        desc = f"Searching for '{clean_kw}' in {category.value}..."
+                    elif attempt == 2:
+                        desc = f"Trying alternative sources for '{tier_query}'..."
+                    elif attempt == 3:
+                        desc = f"Expanding terms to '{tier_query}'..."
+                    elif attempt == 4:
+                        desc = f"Broadening context to '{tier_query}'..."
+                    else:
+                        desc = f"Final matching attempt for '{clean_kw}'..."
+                    status_callback(f"Attempt {attempt}/{total_attempts}: {desc}", attempt, total_attempts)
+            else:
+                tier_query = get_retry_tier_query(category, attempt, mood=mood, color=color)
+                if mood and mood != WallpaperMood.ANY and attempt <= 3:
+                    tier_query = augment_query_with_mood(tier_query, mood, category)
+                if active_season and attempt <= 3:
+                    tier_query = augment_query_with_season(tier_query, active_season, category)
+
+                if status_callback:
+                    mood_info = f" [{mood.value}]" if mood and mood != WallpaperMood.ANY else ""
+                    color_info = f" ({color.value})" if color and color != ColorPalette.ANY else ""
+                    season_info = f" ({get_season_display(active_season)[0]} {active_season.value})" if active_season else ""
+                    retry_strategy = f" [Tier {min(5, attempt)}: '{tier_query}']" if attempt > 1 else ""
+                    status_callback(
+                        f"Attempt {attempt}/{total_attempts}{retry_strategy}: Finding {category.value}{season_info}{mood_info}{color_info} wallpaper...",
+                        attempt,
+                        total_attempts,
+                    )
 
             try:
                 candidates = self.fetch_candidates(
@@ -335,18 +381,31 @@ class ProviderRouter:
                     season=active_season,
                     query=tier_query,
                     tried_sources=tried_sources,
+                    keyword=clean_kw if is_keyword_search else None,
                 )
             except TypeError:
                 candidates = self.fetch_candidates(category, limit=6)
+            total_requests += 1
+
             # Filter out any candidates that already failed in previous attempts
             valid_candidates = [c for c in candidates if c.id not in accumulated_excludes]
 
-            if not valid_candidates:
-                # If all were excluded, retry fresh batch
+            if not valid_candidates and not is_keyword_search:
+                # If all were excluded in category search, retry fresh batch
                 valid_candidates = candidates
 
-            if valid_candidates:
+            if is_keyword_search:
+                # Stage 1 Relevance Gate + Stage 2 Quality Ranking
+                valid_candidates = rank_wallpaper_candidates(
+                    valid_candidates,
+                    keyword=clean_kw,
+                    color=color,
+                    mood=mood,
+                )
+            elif valid_candidates:
                 random.shuffle(valid_candidates)
+
+            if valid_candidates:
                 for candidate in valid_candidates:
                     temp_path = self.download_candidate(candidate, progress_callback)
                     if not temp_path:
@@ -366,20 +425,26 @@ class ProviderRouter:
                         comp_score = compute_image_compatibility_score(img_stats, color, mood)
 
                         if not passes:
-                            # Keep track of closest matching candidate for guaranteed delivery
-                            if best_candidate_info is None or comp_score < best_candidate_info[2]:
-                                if best_candidate_info is not None and best_candidate_info[1] != temp_path:
-                                    try:
-                                        best_candidate_info[1].unlink()
-                                    except Exception:
-                                        pass
-                                best_candidate_info = (candidate, temp_path, comp_score)
+                            # Keep track of closest matching candidate for category fallback
+                            if not is_keyword_search:
+                                if best_candidate_info is None or comp_score < best_candidate_info[2]:
+                                    if best_candidate_info is not None and best_candidate_info[1] != temp_path:
+                                        try:
+                                            best_candidate_info[1].unlink()
+                                        except Exception:
+                                            pass
+                                    best_candidate_info = (candidate, temp_path, comp_score)
+                                else:
+                                    if best_candidate_info is None or best_candidate_info[1] != temp_path:
+                                        try:
+                                            temp_path.unlink()
+                                        except Exception:
+                                            pass
                             else:
-                                if best_candidate_info is None or best_candidate_info[1] != temp_path:
-                                    try:
-                                        temp_path.unlink()
-                                    except Exception:
-                                        pass
+                                try:
+                                    temp_path.unlink()
+                                except Exception:
+                                    pass
 
                             accumulated_excludes.add(candidate.id)
                             if status_callback:
@@ -433,8 +498,12 @@ class ProviderRouter:
                     )
                 time.sleep(1.0)
 
-        # ── Guaranteed Delivery Fallback ──────────────────────────────────
-        # If all attempts exhausted and strictly rejected, deliver the closest candidate
+        # ── Keyword Search Result Finalization ────────────────────────────
+        # Strict Keyword Mode: Never return an unrelated category image when a specific keyword was searched
+        if is_keyword_search:
+            return None, f"No suitable wallpaper found for '{clean_kw}'. Try a broader keyword."
+
+        # ── Guaranteed Delivery Fallback for Standard Category Searches ──
         if best_candidate_info is not None:
             best_cand, best_temp_path, best_score = best_candidate_info
             if best_temp_path.exists():
@@ -474,7 +543,7 @@ class ProviderRouter:
                         except Exception:
                             pass
 
-        # Local cache fallback if all network downloads failed
+        # Local cache fallback if all network downloads failed for category search
         fallback_file = self.cache.get_fallback_wallpaper()
         if fallback_file and fallback_file.exists():
             if status_callback:

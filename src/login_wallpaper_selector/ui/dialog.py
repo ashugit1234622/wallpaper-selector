@@ -25,6 +25,7 @@ from ..core.config import AppConfig
 from ..core.history import HistoryTracker
 from ..core.cache import CacheManager
 from ..core.display import generate_desktop_preview_image
+from ..core.search_history import SearchHistoryManager
 from ..providers.router import ProviderRouter
 from ..adapters.factory import get_wallpaper_adapter
 from .file_picker import pick_local_image
@@ -38,6 +39,7 @@ class WallpaperSelectorDialog:
         self.history = HistoryTracker(self.config)
         self.cache = CacheManager(self.config)
         self.favorites_mgr = FavoritesManager(self.config)
+        self.search_history_mgr = SearchHistoryManager(self.config)
         self.router = ProviderRouter(self.config, self.history, self.cache)
         self.adapter = get_wallpaper_adapter()
 
@@ -46,6 +48,9 @@ class WallpaperSelectorDialog:
         self.staged_metadata: Optional[WallpaperMetadata] = None
         self.selected_color: ColorPalette = ColorPalette.ANY
         self.selected_mood: WallpaperMood = WallpaperMood.ANY
+        self.current_keyword: str = ""
+        self._current_search_id: int = 0
+        self.suggestion_buttons = []
         self.is_busy = False
 
         self._init_window()
@@ -233,6 +238,62 @@ class WallpaperSelectorDialog:
 
         btn_grid.columnconfigure(0, weight=1)
         btn_grid.columnconfigure(1, weight=1)
+
+        # Custom Keyword Search Bar & Suggestions Container
+        search_container = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        search_container.pack(fill="x", padx=24, pady=(2, 6))
+
+        search_row = ctk.CTkFrame(search_container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(search_container)
+        search_row.pack(fill="x", pady=(0, 3))
+
+        if HAS_CUSTOMTKINTER:
+            self.search_entry = ctk.CTkEntry(
+                search_row,
+                placeholder_text="🔍 Search wallpapers (e.g., Black Hole, Cyberpunk, Waterfall)...",
+                height=32,
+                font=ctk.CTkFont(size=12),
+            )
+            self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+            self.search_entry.bind("<Return>", lambda event: self.on_trigger_search())
+
+            self.search_btn = ctk.CTkButton(
+                search_row,
+                text="🔍 Search",
+                width=80,
+                height=32,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#3b82f6",
+                hover_color="#2563eb",
+                command=self.on_trigger_search,
+            )
+            self.search_btn.pack(side="left", padx=(0, 6))
+
+            self.clear_search_btn = ctk.CTkButton(
+                search_row,
+                text="✕",
+                width=32,
+                height=32,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#374151",
+                hover_color="#4b5563",
+                command=self.on_clear_search,
+            )
+            self.clear_search_btn.pack(side="left")
+        else:
+            self.search_entry = tk.Entry(search_row, font=("Helvetica", 10))
+            self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+            self.search_entry.bind("<Return>", lambda event: self.on_trigger_search())
+
+            self.search_btn = tk.Button(search_row, text="🔍 Search", command=self.on_trigger_search)
+            self.search_btn.pack(side="left", padx=(0, 6))
+
+            self.clear_search_btn = tk.Button(search_row, text="✕", command=self.on_clear_search)
+            self.clear_search_btn.pack(side="left")
+
+        # Suggestion pills row
+        self.suggestions_frame = ctk.CTkFrame(search_container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(search_container)
+        self.suggestions_frame.pack(fill="x")
+        self._populate_suggestion_chips()
 
         # Color Palette Swatch Bar
         color_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
@@ -588,7 +649,16 @@ class WallpaperSelectorDialog:
         def _update():
             for btn in self.cat_buttons.values():
                 btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
-            if self.current_category and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+            if hasattr(self, "search_btn"):
+                self.search_btn.configure(state=state) if HAS_CUSTOMTKINTER else self.search_btn.config(state=state)
+            if hasattr(self, "clear_search_btn"):
+                self.clear_search_btn.configure(state=state) if HAS_CUSTOMTKINTER else self.clear_search_btn.config(state=state)
+            if hasattr(self, "search_entry"):
+                self.search_entry.configure(state=state) if HAS_CUSTOMTKINTER else self.search_entry.config(state=state)
+            if hasattr(self, "suggestion_buttons"):
+                for sb in self.suggestion_buttons:
+                    sb.configure(state=state) if HAS_CUSTOMTKINTER else sb.config(state=state)
+            if (self.current_keyword or self.current_category) and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
                 retry_state = "disabled" if busy else "normal"
                 self.retry_btn.configure(state=retry_state) if HAS_CUSTOMTKINTER else self.retry_btn.config(state=retry_state)
             target_meta = self.staged_metadata or self.current_metadata
@@ -785,6 +855,7 @@ class WallpaperSelectorDialog:
             return
 
         self.current_category = category
+        self._populate_suggestion_chips(category)
         if category == WallpaperCategory.LOCAL_STORAGE:
             self._handle_local_storage()
         elif category == WallpaperCategory.FAVORITES:
@@ -1137,8 +1208,153 @@ class WallpaperSelectorDialog:
 
         self.root.after(0, _update)
 
+    def _populate_suggestion_chips(self, category: Optional[WallpaperCategory] = None) -> None:
+        """Populate clickable keyword suggestion pills beneath the search bar."""
+        if not hasattr(self, "suggestions_frame"):
+            return
+        for child in self.suggestions_frame.winfo_children():
+            child.destroy()
+        self.suggestion_buttons = []
+
+        hint_lbl = (
+            ctk.CTkLabel(self.suggestions_frame, text="💡 Try:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#9ca3af")
+            if HAS_CUSTOMTKINTER
+            else tk.Label(self.suggestions_frame, text="💡 Try:", font=("Helvetica", 9, "bold"), fg="gray")
+        )
+        hint_lbl.pack(side="left", padx=(2, 6))
+
+        suggestions = self.search_history_mgr.get_suggestions(category, limit=5)
+        for kw in suggestions:
+            if HAS_CUSTOMTKINTER:
+                btn = ctk.CTkButton(
+                    self.suggestions_frame,
+                    text=kw,
+                    height=22,
+                    font=ctk.CTkFont(size=11),
+                    fg_color="#1f2937",
+                    hover_color="#374151",
+                    text_color="#e5e7eb",
+                    corner_radius=11,
+                    command=lambda q=kw: self._on_suggestion_click(q),
+                )
+                btn.pack(side="left", padx=2)
+            else:
+                btn = tk.Button(
+                    self.suggestions_frame,
+                    text=kw,
+                    font=("Helvetica", 8),
+                    command=lambda q=kw: self._on_suggestion_click(q),
+                )
+                btn.pack(side="left", padx=2)
+            self.suggestion_buttons.append(btn)
+
+    def _on_suggestion_click(self, query: str) -> None:
+        """Handle click on a suggestion chip."""
+        if self.is_busy:
+            return
+        if hasattr(self, "search_entry"):
+            self.search_entry.delete(0, tk.END)
+            self.search_entry.insert(0, query)
+        self.on_trigger_search(query)
+
+    def on_trigger_search(self, query: Optional[str] = None) -> None:
+        """Initiate custom keyword search with intelligent fallback and monotonic ID tracking."""
+        if query is None:
+            query = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
+
+        if not query:
+            # Preserve blank search behavior: run standard category workflow
+            if self.current_category and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+                self._handle_online_category(self.current_category)
+            elif not self.current_category:
+                self.set_status("Please select a category or enter a search keyword.")
+            return
+
+        if self.is_busy:
+            return
+
+        self._current_search_id += 1
+        search_id = self._current_search_id
+        self.current_keyword = query
+
+        cat = self.current_category
+        if not cat or cat in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+            cat = WallpaperCategory.SPACE
+
+        self.set_busy(True)
+        self.set_status(f"Searching for '{query}' wallpaper...", progress=0.05)
+
+        def _worker():
+            def _progress(downloaded: int, total: int):
+                if self._current_search_id != search_id:
+                    return
+                frac = min(0.9, 0.2 + (downloaded / total) * 0.7) if total > 0 else 0.5
+                kb = downloaded // 1024
+                self.set_status(f"Downloading '{query}' ({kb} KB)...", progress=frac)
+
+            def _status(msg: str, attempt: int, total_attempts: int):
+                if self._current_search_id != search_id:
+                    return
+                self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
+
+            mode = self.mode_var.get()
+            meta, err = self.router.acquire_wallpaper_for_category(
+                cat,
+                mode=mode,
+                progress_callback=_progress,
+                status_callback=_status,
+                color=self.selected_color,
+                mood=self.selected_mood,
+                keyword=query,
+            )
+
+            if self._current_search_id != search_id:
+                # Obsolete search result; discarded
+                return
+
+            cat_str = cat.value if hasattr(cat, "value") else str(cat)
+            if meta:
+                self.search_history_mgr.record_search(query, cat_str, success=True, metadata=meta)
+                self.staged_metadata = meta
+                if self.config.preview_before_apply:
+                    self.set_status(f"✓ Found '{query}': {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
+                    self._update_preview_and_attribution(meta, staged=True)
+                else:
+                    self.set_status(f"Applying '{query}' to desktop...", progress=0.95)
+                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    if success:
+                        lock_msg = ""
+                        if self.lockscreen_var.get():
+                            lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                            if lock_ok:
+                                lock_msg = " & Lock Screen"
+                        self.current_metadata = meta
+                        self.set_status(f"✓ Applied '{query}' wallpaper{lock_msg}: {meta.title}", progress=1.0)
+                        self._update_preview_and_attribution(meta, staged=False)
+                    else:
+                        self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
+            else:
+                self.search_history_mgr.record_search(query, cat_str, success=False)
+                # Strict keyword search: never silently replace with an unrelated cached category image
+                self.set_status(f"Search failed: {err}", progress=0.0)
+
+            self.set_busy(False)
+            self.root.after(0, lambda: self._populate_suggestion_chips(self.current_category))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def on_clear_search(self) -> None:
+        """Clear search entry and restore default suggestions without resetting current preview."""
+        if hasattr(self, "search_entry"):
+            self.search_entry.delete(0, tk.END)
+        self.current_keyword = ""
+        self._populate_suggestion_chips(self.current_category)
+        self.set_status("Search input cleared.")
+
     def on_retry(self) -> None:
-        if self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
+        if self.current_keyword:
+            self.on_trigger_search(self.current_keyword)
+        elif self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
             self._handle_online_category(self.current_category)
 
     def on_close(self) -> None:

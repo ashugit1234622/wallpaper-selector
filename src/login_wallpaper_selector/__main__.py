@@ -183,6 +183,7 @@ def set_category_headless(
     color_str: Optional[str] = None,
     mood_str: Optional[str] = None,
     layout_aware: Optional[bool] = None,
+    keyword_str: Optional[str] = None,
 ) -> int:
     """Directly fetch and apply a category wallpaper headlessly."""
     category = None
@@ -220,7 +221,8 @@ def set_category_headless(
     pos_mode = mode or config.default_position
     mood_desc = f" [{wallpaper_mood.value}]" if wallpaper_mood and wallpaper_mood != WallpaperMood.ANY else ""
     color_desc = f" ({color_palette.value})" if color_palette and color_palette != ColorPalette.ANY else ""
-    print(f"Acquiring {category.value}{mood_desc}{color_desc} wallpaper (Mode: {pos_mode})...")
+    kw_desc = f" matching '{keyword_str}'" if keyword_str else ""
+    print(f"Acquiring {category.value}{kw_desc}{mood_desc}{color_desc} wallpaper (Mode: {pos_mode})...")
 
     def _cli_status(msg: str, attempt: int, total_attempts: int):
         print(f"  [{attempt}/{total_attempts}] {msg}")
@@ -231,6 +233,7 @@ def set_category_headless(
         status_callback=_cli_status,
         color=color_palette,
         mood=wallpaper_mood,
+        keyword=keyword_str,
     )
     if not meta:
         print(f"Failed to acquire wallpaper: {err}")
@@ -317,6 +320,7 @@ def main() -> None:
     parser.add_argument("--install", action="store_true", help="Register current-user login autostart")
     parser.add_argument("--uninstall", action="store_true", help="Deregister login autostart")
     parser.add_argument("--set-category", type=str, help="Headlessly fetch and apply a category (Space, Nature, Art, Portrait)")
+    parser.add_argument("--keyword", "-k", type=str, default=None, help="Search for wallpapers matching a custom keyword (e.g. 'Black Hole')")
     parser.add_argument("--mode", type=str, choices=["Fill", "Fit"], help="Display mode (Fill or Fit)")
     parser.add_argument("--set-lockscreen", action="store_true", help="Also apply the fetched wallpaper to system lock screen")
     parser.add_argument("--create-shortcut", action="store_true", help="Create a desktop shortcut with custom icon to run the app")
@@ -353,8 +357,9 @@ def main() -> None:
         sys.exit(run_rotate_now())
     elif args.daemon:
         sys.exit(run_rotation_daemon())
-    elif args.set_category:
-        sys.exit(set_category_headless(args.set_category, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware))
+    elif args.set_category or args.keyword:
+        cat_to_use = args.set_category or "Space"
+        sys.exit(set_category_headless(cat_to_use, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware, keyword_str=args.keyword))
     else:
         # Default action: launch GUI dialog
         launch_gui(is_login=args.on_login)
