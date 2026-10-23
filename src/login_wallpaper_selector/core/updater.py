@@ -245,7 +245,21 @@ def apply_update(
                 timeout=90.0,
             )
             if pip_res.returncode != 0:
-                return False, f"pip install failed: {pip_res.stderr or pip_res.stdout}"
+                # Fallback without build isolation if environment already has setuptools/wheel
+                pip_fallback = [sys.executable, "-m", "pip", "install", "-e", ".", "--no-build-isolation"]
+                pip_res = subprocess.run(
+                    pip_fallback,
+                    cwd=project_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=90.0,
+                )
+
+            if pip_res.returncode != 0:
+                raw_err = pip_res.stderr or pip_res.stdout or "pip install failed"
+                lines = [ln.strip() for ln in raw_err.splitlines() if ln.strip()]
+                clean_err = lines[-1] if lines else raw_err
+                return False, f"pip install failed: {clean_err}"
 
             _notify("Refreshing desktop shortcuts...", 0.90)
             shortcut_cmd = [sys.executable, "-m", "login_wallpaper_selector", "--create-shortcut"]

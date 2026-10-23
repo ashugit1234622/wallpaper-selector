@@ -1,6 +1,7 @@
 """In-app modal dialog displaying update availability, release notes, and download progress."""
 
 from __future__ import annotations
+import time
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -30,11 +31,11 @@ class UpdateModalDialog:
             self.window = tk.Toplevel(parent)
 
         self.window.title("Software Update Available")
-        self.window.geometry("520x420")
+        self.window.geometry("540x460")
         self.window.resizable(False, False)
         self.window.attributes("-topmost", True)
 
-        self._center_window(520, 420)
+        self._center_window(540, 460)
         self._build_widgets()
 
     def _center_window(self, width: int, height: int) -> None:
@@ -50,62 +51,9 @@ class UpdateModalDialog:
         container = ctk.CTkFrame(self.window) if HAS_CUSTOMTKINTER else tk.Frame(self.window)
         container.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Header Badge
-        header_text = f"🚀 New Major Update: v{self.update_info.latest_version}"
-        header_lbl = (
-            ctk.CTkLabel(container, text=header_text, font=ctk.CTkFont(size=18, weight="bold"), text_color="#38bdf8")
-            if HAS_CUSTOMTKINTER
-            else tk.Label(container, text=header_text, font=("Helvetica", 14, "bold"), fg="#0284c7")
-        )
-        header_lbl.pack(anchor="w", pady=(0, 4))
-
-        sub_text = f"Current version: v{self.update_info.current_version}  •  Release: {self.update_info.release_title or self.update_info.latest_version}"
-        sub_lbl = (
-            ctk.CTkLabel(container, text=sub_text, font=ctk.CTkFont(size=12), text_color="gray")
-            if HAS_CUSTOMTKINTER
-            else tk.Label(container, text=sub_text, fg="gray", font=("Helvetica", 9))
-        )
-        sub_lbl.pack(anchor="w", pady=(0, 12))
-
-        # Release Notes Label
-        notes_hdr = (
-            ctk.CTkLabel(container, text="Release Notes & Highlights:", font=ctk.CTkFont(size=12, weight="bold"))
-            if HAS_CUSTOMTKINTER
-            else tk.Label(container, text="Release Notes & Highlights:", font=("Helvetica", 9, "bold"))
-        )
-        notes_hdr.pack(anchor="w", pady=(0, 4))
-
-        # Scrollable Release Notes Box
-        if HAS_CUSTOMTKINTER:
-            self.notes_box = ctk.CTkTextbox(container, height=140, font=ctk.CTkFont(size=11), wrap="word")
-            self.notes_box.pack(fill="x", pady=(0, 12))
-            clean_notes = self.update_info.release_notes or "A new version of Login Wallpaper Selector is available on GitHub."
-            self.notes_box.insert("1.0", clean_notes)
-            self.notes_box.configure(state="disabled")
-        else:
-            self.notes_box = tk.Text(container, height=8, wrap="word", font=("Helvetica", 9))
-            self.notes_box.pack(fill="x", pady=(0, 12))
-            self.notes_box.insert("1.0", self.update_info.release_notes or "New version available.")
-            self.notes_box.config(state="disabled")
-
-        # Progress Area (Initially hidden / ready)
-        self.status_lbl = (
-            ctk.CTkLabel(container, text="", font=ctk.CTkFont(size=12))
-            if HAS_CUSTOMTKINTER
-            else tk.Label(container, text="")
-        )
-        self.status_lbl.pack(fill="x", pady=(2, 4))
-
-        if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(container)
-            self.progress_bar.pack(fill="x", pady=(0, 14))
-            self.progress_bar.set(0)
-        else:
-            self.progress_bar = None
-
-        # Button Toolbar
+        # Bottom Button Toolbar - Packed FIRST with side="bottom" so buttons are NEVER overlapped
         btn_frame = ctk.CTkFrame(container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(container)
-        btn_frame.pack(fill="x", side="bottom")
+        btn_frame.pack(side="bottom", fill="x", pady=(10, 0))
 
         if HAS_CUSTOMTKINTER:
             self.later_btn = ctk.CTkButton(
@@ -137,6 +85,59 @@ class UpdateModalDialog:
             self.update_btn = tk.Button(btn_frame, text="⬇️ Download & Update", command=self.on_start_update)
             self.update_btn.pack(side="right")
 
+        # Header Badge
+        header_text = f"🚀 New Major Update: v{self.update_info.latest_version}"
+        header_lbl = (
+            ctk.CTkLabel(container, text=header_text, font=ctk.CTkFont(size=18, weight="bold"), text_color="#38bdf8")
+            if HAS_CUSTOMTKINTER
+            else tk.Label(container, text=header_text, font=("Helvetica", 14, "bold"), fg="#0284c7")
+        )
+        header_lbl.pack(anchor="w", pady=(0, 4))
+
+        sub_text = f"Current version: v{self.update_info.current_version}  •  Release: {self.update_info.release_title or self.update_info.latest_version}"
+        sub_lbl = (
+            ctk.CTkLabel(container, text=sub_text, font=ctk.CTkFont(size=12), text_color="gray")
+            if HAS_CUSTOMTKINTER
+            else tk.Label(container, text=sub_text, fg="gray", font=("Helvetica", 9))
+        )
+        sub_lbl.pack(anchor="w", pady=(0, 10))
+
+        # Release Notes Label
+        notes_hdr = (
+            ctk.CTkLabel(container, text="Release Notes & Highlights:", font=ctk.CTkFont(size=12, weight="bold"))
+            if HAS_CUSTOMTKINTER
+            else tk.Label(container, text="Release Notes & Highlights:", font=("Helvetica", 9, "bold"))
+        )
+        notes_hdr.pack(anchor="w", pady=(0, 4))
+
+        # Scrollable Release Notes Box
+        if HAS_CUSTOMTKINTER:
+            self.notes_box = ctk.CTkTextbox(container, height=130, font=ctk.CTkFont(size=11), wrap="word")
+            self.notes_box.pack(fill="both", expand=True, pady=(0, 8))
+            clean_notes = self.update_info.release_notes or "A new version of Login Wallpaper Selector is available on GitHub."
+            self.notes_box.insert("1.0", clean_notes)
+            self.notes_box.configure(state="disabled")
+        else:
+            self.notes_box = tk.Text(container, height=7, wrap="word", font=("Helvetica", 9))
+            self.notes_box.pack(fill="both", expand=True, pady=(0, 8))
+            self.notes_box.insert("1.0", self.update_info.release_notes or "New version available.")
+            self.notes_box.config(state="disabled")
+
+        # Progress Area
+        self.status_lbl = (
+            ctk.CTkLabel(container, text="", font=ctk.CTkFont(size=11), wraplength=480, justify="left")
+            if HAS_CUSTOMTKINTER
+            else tk.Label(container, text="", wraplength=480, justify="left")
+        )
+        self.status_lbl.pack(fill="x", pady=(2, 4))
+
+        if HAS_CUSTOMTKINTER:
+            self.progress_bar = ctk.CTkProgressBar(container)
+            self.progress_bar.pack(fill="x", pady=(0, 6))
+            self.progress_bar.set(0)
+        else:
+            self.progress_bar = None
+
     def on_start_update(self) -> None:
         """Trigger update workflow in background with live GUI feedback."""
         if self.is_updating:
@@ -167,7 +168,15 @@ class UpdateModalDialog:
                 time.sleep(2.0)
                 restart_application()
             else:
-                _progress(f"✗ Update failed: {err}", 0.0)
+                # Clean error message: grab informative last line to keep dialog uncluttered
+                clean_err = "Unknown error"
+                if err:
+                    lines = [ln.strip() for ln in err.splitlines() if ln.strip()]
+                    clean_err = lines[-1] if lines else str(err)
+                    if len(clean_err) > 90:
+                        clean_err = clean_err[:90] + "..."
+                _progress(f"✗ Update failed: {clean_err}", 0.0)
+
                 def _re_enable():
                     if HAS_CUSTOMTKINTER:
                         self.update_btn.configure(state="normal", text="Retry Update")
@@ -179,3 +188,4 @@ class UpdateModalDialog:
                 self.window.after(0, _re_enable)
 
         threading.Thread(target=_worker, daemon=True).start()
+

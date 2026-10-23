@@ -13,10 +13,6 @@ authors = [
     { name = "Login Wallpaper Selector Team" }
 ]
 
-[project.urls]
-Homepage = "https://github.com/ashugit1234622/wallpaper-selector"
-Repository = "https://github.com/ashugit1234622/wallpaper-selector"
-Issues = "https://github.com/ashugit1234622/wallpaper-selector/issues"
 dependencies = [
     "httpx>=0.24.0",
     "pillow>=9.0.0",
@@ -24,6 +20,11 @@ dependencies = [
     "customtkinter>=5.2.0; platform_system=='Windows' or platform_system=='Linux' or platform_system=='Darwin'",
     "pywin32>=305; platform_system=='Windows'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ashugit1234622/wallpaper-selector"
+Repository = "https://github.com/ashugit1234622/wallpaper-selector"
+Issues = "https://github.com/ashugit1234622/wallpaper-selector/issues"
 
 [project.optional-dependencies]
 dev = [
