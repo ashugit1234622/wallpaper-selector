@@ -8,7 +8,7 @@ import httpx
 
 from .base import BaseImageProvider
 from ..core.models import WallpaperCategory, WallpaperCandidate, ColorPalette, WallpaperMood
-from ..core.color_analyzer import get_wallhaven_color_code
+from ..core.color_analyzer import get_wallhaven_color_code, get_palette_keyword
 from ..core.mood_matcher import augment_query_with_mood
 
 
@@ -101,10 +101,30 @@ class WallhavenProvider(BaseImageProvider):
         try:
             with httpx.Client(timeout=self.timeout_seconds, headers=headers) as client:
                 resp = client.get(self.SEARCH_URL, params=params)
-                if resp.status_code != 200:
-                    return []
+                data = resp.json().get("data", []) if resp.status_code == 200 else []
 
-                data = resp.json().get("data", [])
+                # Smart fallback if combined query + color tag over-constrained the result to 0
+                if not data and color_code:
+                    short_q = category.value.lower() if hasattr(category, "value") else str(category).lower()
+                    # Fallback 1: Query by colors code with concise category keyword
+                    params_fallback_1 = dict(params)
+                    params_fallback_1["q"] = short_q
+                    params_fallback_1["seed"] = self._generate_seed()
+                    resp1 = client.get(self.SEARCH_URL, params=params_fallback_1)
+                    if resp1.status_code == 200:
+                        data = resp1.json().get("data", [])
+
+                    # Fallback 2: Omit colors tag and augment text query with color term
+                    if not data:
+                        pal_kw = "black and white" if color == ColorPalette.MONOCHROME else (get_palette_keyword(color) or "")
+                        params_fallback_2 = dict(params)
+                        params_fallback_2.pop("colors", None)
+                        params_fallback_2["q"] = f"{short_q} {pal_kw}".strip()
+                        params_fallback_2["seed"] = self._generate_seed()
+                        resp2 = client.get(self.SEARCH_URL, params=params_fallback_2)
+                        if resp2.status_code == 200:
+                            data = resp2.json().get("data", [])
+
                 for item in data:
                     item_id = item.get("id")
                     if not item_id:

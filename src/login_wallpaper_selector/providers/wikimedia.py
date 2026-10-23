@@ -69,6 +69,11 @@ class WikimediaCommonsProvider(BaseImageProvider):
         search_query = query or (random.choice(queries) if queries else "landscape")
         if mood and mood != WallpaperMood.ANY:
             search_query = augment_query_with_mood(search_query, mood, category)
+        if color and color != ColorPalette.ANY:
+            from ..core.color_analyzer import get_palette_keyword
+            pal_kw = "black and white" if color == ColorPalette.MONOCHROME else get_palette_keyword(color)
+            if pal_kw and pal_kw not in search_query.lower():
+                search_query = f"{search_query} {pal_kw}"
         exclude = exclude_ids or set()
         candidates: List[WallpaperCandidate] = []
 

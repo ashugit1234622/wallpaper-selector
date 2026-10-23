@@ -217,60 +217,90 @@ def validate_image_matches_selection(
     stats: "ImageStats",
     target_palette: Optional[ColorPalette],
     target_mood: Optional[WallpaperMood],
+    attempt: int = 1,
+    allow_soft: bool = False,
 ) -> Tuple[bool, str]:
     """Return (passes, reason) — False means the image should be rejected.
 
-    Strict thresholds applied after download:
-    - Dark mood:       mean_brightness ≤ 0.45  AND dark_pixel_ratio ≥ 0.35
-    - Vibrant mood:   mean_saturation ≥ 0.28  AND mean_brightness ≥ 0.28
-    - Peaceful mood:  mean_brightness ≥ 0.20  (not pitch-black)
-    - Monochrome palette: mean_saturation ≤ 0.25  OR mean_brightness ≤ 0.20
-    - Other palettes:  dominant_palette must match target_palette
+    Adaptive thresholds applied after download:
+    - Attempts 1–2 (Strict):
+        * Dark mood:       mean_brightness ≤ 0.46  AND dark_pixel_ratio ≥ 0.32
+        * Vibrant mood:    mean_saturation ≥ 0.28  AND mean_brightness ≥ 0.28
+        * Peaceful mood:   mean_brightness ≥ 0.20
+        * Monochrome:      mean_saturation ≤ 0.28  OR mean_brightness ≤ 0.22
+    - Attempts 3–5 or allow_soft (Soft Adaptive):
+        * Dark mood:       mean_brightness ≤ 0.58  AND dark_pixel_ratio ≥ 0.20
+        * Vibrant mood:    mean_saturation ≥ 0.22  AND mean_brightness ≥ 0.22
+        * Peaceful mood:   mean_brightness ≥ 0.15
+        * Monochrome:      mean_saturation ≤ 0.38
+    - Other palettes: dominant_palette matches target_palette or monochrome.
     """
+    is_soft = allow_soft or attempt >= 3
+
     # ── Mood gate ──────────────────────────────────────────────────────────
     if target_mood and target_mood != WallpaperMood.ANY:
         if target_mood == WallpaperMood.DARK:
-            if stats.mean_brightness > 0.45:
-                return False, (
-                    f"Dark mood: brightness {stats.mean_brightness:.2f} > 0.45"
-                )
-            if stats.dark_pixel_ratio < 0.35:
-                return False, (
-                    f"Dark mood: dark_pixel_ratio {stats.dark_pixel_ratio:.2f} < 0.35"
-                )
+            max_b = 0.58 if is_soft else 0.46
+            min_dp = 0.20 if is_soft else 0.32
+            if stats.mean_brightness > max_b:
+                return False, f"Dark mood: brightness {stats.mean_brightness:.2f} > {max_b:.2f}"
+            if stats.dark_pixel_ratio < min_dp:
+                return False, f"Dark mood: dark_pixel_ratio {stats.dark_pixel_ratio:.2f} < {min_dp:.2f}"
 
         elif target_mood == WallpaperMood.VIBRANT:
-            if stats.mean_saturation < 0.28:
-                return False, (
-                    f"Vibrant mood: saturation {stats.mean_saturation:.2f} < 0.28"
-                )
-            if stats.mean_brightness < 0.28:
-                return False, (
-                    f"Vibrant mood: brightness {stats.mean_brightness:.2f} < 0.28"
-                )
+            min_s = 0.22 if is_soft else 0.28
+            min_b = 0.22 if is_soft else 0.28
+            if stats.mean_saturation < min_s:
+                return False, f"Vibrant mood: saturation {stats.mean_saturation:.2f} < {min_s:.2f}"
+            if stats.mean_brightness < min_b:
+                return False, f"Vibrant mood: brightness {stats.mean_brightness:.2f} < {min_b:.2f}"
 
         elif target_mood == WallpaperMood.PEACEFUL:
-            if stats.mean_brightness < 0.20:
-                return False, (
-                    f"Peaceful mood: brightness {stats.mean_brightness:.2f} < 0.20"
-                )
+            min_b = 0.15 if is_soft else 0.20
+            if stats.mean_brightness < min_b:
+                return False, f"Peaceful mood: brightness {stats.mean_brightness:.2f} < {min_b:.2f}"
 
     # ── Palette gate ───────────────────────────────────────────────────────
     if target_palette and target_palette not in (ColorPalette.ANY, ColorPalette.CUSTOM):
         if target_palette == ColorPalette.MONOCHROME:
-            # Reject if both saturated AND bright — clearly a colorful image
-            if stats.mean_saturation > 0.25 and stats.mean_brightness > 0.22:
-                return False, (
-                    f"Monochrome: sat={stats.mean_saturation:.2f}>0.25 "
-                    f"AND brightness={stats.mean_brightness:.2f}>0.22"
-                )
+            max_s = 0.38 if is_soft else 0.28
+            if stats.mean_saturation > max_s and stats.mean_brightness > 0.24:
+                return False, f"Monochrome: sat={stats.mean_saturation:.2f}>{max_s:.2f} AND brightness={stats.mean_brightness:.2f}>0.24"
         else:
-            # Hue-based palettes — dominant palette must match
-            if (stats.dominant_palette != target_palette
-                    and stats.dominant_palette != ColorPalette.MONOCHROME):
-                return False, (
-                    f"Palette mismatch: image={stats.dominant_palette.value}, "
-                    f"expected={target_palette.value}"
-                )
+            if stats.dominant_palette != target_palette:
+                if not (is_soft and stats.dominant_palette == ColorPalette.MONOCHROME):
+                    return False, f"Palette mismatch: image={stats.dominant_palette.value}, expected={target_palette.value}"
 
     return True, "ok"
+
+
+def compute_image_compatibility_score(
+    stats: "ImageStats",
+    target_palette: Optional[ColorPalette],
+    target_mood: Optional[WallpaperMood],
+) -> float:
+    """Calculate distance penalty score [0.0..infinity) between candidate stats and target criteria.
+
+    Lower score is better; 0.0 is an ideal match.
+    Used on final fallback tier to guarantee the best candidate is chosen rather than failing.
+    """
+    penalty = 0.0
+
+    if target_mood and target_mood != WallpaperMood.ANY:
+        if target_mood == WallpaperMood.DARK:
+            penalty += max(0.0, stats.mean_brightness - 0.35) * 2.5
+            penalty += max(0.0, 0.40 - stats.dark_pixel_ratio) * 1.5
+        elif target_mood == WallpaperMood.VIBRANT:
+            penalty += max(0.0, 0.45 - stats.mean_saturation) * 2.0
+            penalty += max(0.0, 0.40 - stats.mean_brightness) * 1.0
+        elif target_mood == WallpaperMood.PEACEFUL:
+            penalty += max(0.0, 0.25 - stats.mean_brightness) * 1.5
+
+    if target_palette and target_palette not in (ColorPalette.ANY, ColorPalette.CUSTOM):
+        if target_palette == ColorPalette.MONOCHROME:
+            penalty += stats.mean_saturation * 3.0
+        else:
+            if stats.dominant_palette != target_palette:
+                penalty += 1.5
+
+    return penalty

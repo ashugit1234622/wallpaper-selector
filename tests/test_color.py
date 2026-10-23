@@ -114,3 +114,62 @@ def test_provider_color_integration():
 
     bing = BingImageProvider()
     assert bing.supports_color_filtering() is True
+
+
+def test_validate_image_matches_selection_strict_vs_soft():
+    from login_wallpaper_selector.core.color_analyzer import ImageStats, validate_image_matches_selection
+    from login_wallpaper_selector.core.models import WallpaperMood
+
+    # Moderately dark image (brightness 0.50, dark_pixel_ratio 0.25)
+    # Fails strict (attempt 1), passes soft (attempt 3)
+    stats_borderline_dark = ImageStats(
+        mean_brightness=0.50,
+        mean_saturation=0.10,
+        dark_pixel_ratio=0.25,
+        dominant_palette=ColorPalette.MONOCHROME,
+    )
+    # Attempt 1: Strict gate rejects (0.50 > 0.46)
+    passes_strict, reason_strict = validate_image_matches_selection(
+        stats_borderline_dark,
+        target_palette=ColorPalette.MONOCHROME,
+        target_mood=WallpaperMood.DARK,
+        attempt=1,
+    )
+    assert passes_strict is False
+    assert "brightness" in reason_strict
+
+    # Attempt 3: Soft adaptive gate accepts (0.50 <= 0.58 and 0.25 >= 0.20)
+    passes_soft, reason_soft = validate_image_matches_selection(
+        stats_borderline_dark,
+        target_palette=ColorPalette.MONOCHROME,
+        target_mood=WallpaperMood.DARK,
+        attempt=3,
+    )
+    assert passes_soft is True
+    assert reason_soft == "ok"
+
+
+def test_compute_image_compatibility_score():
+    from login_wallpaper_selector.core.color_analyzer import ImageStats, compute_image_compatibility_score
+    from login_wallpaper_selector.core.models import WallpaperMood
+
+    dark_stats = ImageStats(
+        mean_brightness=0.20,
+        mean_saturation=0.05,
+        dark_pixel_ratio=0.60,
+        dominant_palette=ColorPalette.MONOCHROME,
+    )
+    bright_stats = ImageStats(
+        mean_brightness=0.80,
+        mean_saturation=0.80,
+        dark_pixel_ratio=0.05,
+        dominant_palette=ColorPalette.WARM,
+    )
+
+    score_dark = compute_image_compatibility_score(dark_stats, ColorPalette.MONOCHROME, WallpaperMood.DARK)
+    score_bright = compute_image_compatibility_score(bright_stats, ColorPalette.MONOCHROME, WallpaperMood.DARK)
+
+    # Lower score is better match
+    assert score_dark < score_bright
+    assert score_dark < 0.5
+    assert score_bright > 2.0

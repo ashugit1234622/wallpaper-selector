@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 import httpx
 
 from .base import BaseImageProvider
@@ -25,6 +25,8 @@ from ..core.color_analyzer import (
     compute_color_match_score,
     compute_image_stats_from_file,
     validate_image_matches_selection,
+    compute_image_compatibility_score,
+    get_palette_keyword,
 )
 from ..core.mood_matcher import augment_query_with_mood
 
@@ -39,9 +41,9 @@ RETRY_QUERY_TIERS: dict[WallpaperCategory, dict[int, List[str]]] = {
     },
     WallpaperCategory.NATURE: {
         1: ["scenic mountain landscape", "forest misty morning", "lake reflection sunset", "coastal ocean cliffs"],
-        2: ["vibrant autumn woodland", "alpine mountain peaks dramatic", "tranquil pine forest river", "aurora borealis landscape"],
+        2: ["deep autumn woodland", "alpine mountain peaks dramatic", "tranquil pine forest river", "aurora borealis landscape"],
         3: ["cinematic nature vista", "dramatic sunset clouds horizon", "wilderness mountain valley", "peaceful lake mist"],
-        4: ["high resolution landscape", "national park mountains", "scenic nature widescreen", "wildflower valley"],
+        4: ["high resolution landscape", "national park mountains", "scenic nature widescreen", "mountain valley"],
         5: ["nature", "landscape", "mountains", "forest"],
     },
     WallpaperCategory.ART: {
@@ -61,12 +63,40 @@ RETRY_QUERY_TIERS: dict[WallpaperCategory, dict[int, List[str]]] = {
 }
 
 
-def get_retry_tier_query(category: WallpaperCategory, attempt: int) -> str:
-    """Retrieve progressive query variation according to attempt tier (1 to 5)."""
+def get_retry_tier_query(
+    category: WallpaperCategory,
+    attempt: int,
+    mood: Optional[WallpaperMood] = None,
+    color: Optional[ColorPalette] = None,
+) -> str:
+    """Retrieve progressive query variation according to attempt tier (1 to 5).
+    
+    Harmonizes with active mood and palette filters to avoid contradictory searches.
+    """
     tier = max(1, min(5, attempt))
     cat_tiers = RETRY_QUERY_TIERS.get(category, {})
     tier_options = cat_tiers.get(tier, [category.value.lower() if hasattr(category, "value") else str(category).lower()])
-    return random.choice(tier_options)
+
+    # If Dark or Monochrome is selected, avoid contradictory words
+    contradictory_words = []
+    if mood == WallpaperMood.DARK:
+        contradictory_words.extend(["vibrant", "radiant", "sunny", "sunlight", "golden hour", "wildflower"])
+    if color == ColorPalette.MONOCHROME:
+        contradictory_words.extend(["vibrant", "colorful", "rainbow", "wildflower"])
+
+    filtered_options = [
+        opt for opt in tier_options
+        if not any(w in opt.lower() for w in contradictory_words)
+    ]
+    chosen = random.choice(filtered_options) if filtered_options else random.choice(tier_options)
+
+    # Synthesize color keyword if a specific palette is chosen
+    if color and color != ColorPalette.ANY:
+        pal_kw = "black and white" if color == ColorPalette.MONOCHROME else get_palette_keyword(color)
+        if pal_kw and pal_kw.lower() not in chosen.lower():
+            chosen = f"{chosen} {pal_kw}"
+
+    return chosen
 
 
 class ProviderRouter:
@@ -87,17 +117,30 @@ class ProviderRouter:
 
     USER_AGENT = "LoginWallpaperSelector/1.0 (contact@mywallpaperapp.org)"
 
-    def get_providers_for_category(self, category: WallpaperCategory) -> List[BaseImageProvider]:
+    def get_providers_for_category(
+        self,
+        category: WallpaperCategory,
+        color: Optional[ColorPalette] = None,
+        mood: Optional[WallpaperMood] = None,
+    ) -> List[BaseImageProvider]:
         """Ordered list of providers (primary followed by secondary and fallbacks)."""
         if category == WallpaperCategory.SPACE:
-            return [self.nasa, self.wallhaven, self.bing, self.wikimedia]
+            providers = [self.nasa, self.wallhaven, self.bing, self.wikimedia]
         elif category == WallpaperCategory.NATURE:
-            return [self.wallhaven, self.bing, self.wikimedia]
+            providers = [self.wallhaven, self.bing, self.wikimedia]
         elif category == WallpaperCategory.ART:
-            return [self.the_met, self.wallhaven, self.wikimedia, self.artic]
+            providers = [self.the_met, self.wallhaven, self.wikimedia, self.artic]
         elif category == WallpaperCategory.PORTRAIT:
-            return [self.the_met, self.wallhaven, self.wikimedia]
-        return []
+            providers = [self.the_met, self.wallhaven, self.wikimedia]
+        else:
+            providers = []
+
+        # When Dark or Monochrome is active, prioritize search-capable providers
+        # and move Bing (which only has bright daylight daily photos) to the end.
+        if (mood == WallpaperMood.DARK or color == ColorPalette.MONOCHROME) and self.bing in providers:
+            providers = [p for p in providers if p != self.bing] + [self.bing]
+
+        return providers
 
     def fetch_candidates(
         self,
@@ -111,7 +154,10 @@ class ProviderRouter:
         tried_sources: Optional[Dict[str, Any]] = None,
     ) -> List[WallpaperCandidate]:
         """Fetch candidate images for a category, interleaving results across available providers."""
-        providers = self.get_providers_for_category(category)
+        try:
+            providers = self.get_providers_for_category(category, color=color, mood=mood)
+        except TypeError:
+            providers = self.get_providers_for_category(category)
         if not providers:
             return []
 
@@ -248,18 +294,21 @@ class ProviderRouter:
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
         """Fetch, download, validate, cache, and record a wallpaper for an online category with retries.
         
-        Tries at least 5 times across available repositories until a successful image is fetched.
+        Tries across available repositories with progressive adaptive thresholds.
+        If strict validation rejects all candidates across attempts, the best-scoring candidate
+        closest to the target criteria is delivered to guarantee zero search failures.
 
         Returns:
             Tuple of (WallpaperMetadata, error_message)
         """
-        total_attempts = max(5, max_retries or getattr(self.config, "max_fetch_retries", 5))
+        total_attempts = max_retries if max_retries is not None else getattr(self.config, "max_fetch_retries", 5)
         accumulated_excludes = set(self.history.get_recent_ids())
         active_season = season or (get_current_season() if getattr(self.config, "seasonal_theme_enabled", False) else None)
         tried_sources: Dict[str, Any] = {}
+        best_candidate_info: Optional[Tuple[WallpaperCandidate, Path, float]] = None
 
         for attempt in range(1, total_attempts + 1):
-            tier_query = get_retry_tier_query(category, attempt)
+            tier_query = get_retry_tier_query(category, attempt, mood=mood, color=color)
             if mood and mood != WallpaperMood.ANY and attempt <= 3:
                 tier_query = augment_query_with_mood(tier_query, mood, category)
             if active_season and attempt <= 3:
@@ -304,22 +353,34 @@ class ProviderRouter:
                         accumulated_excludes.add(candidate.id)
                         continue
 
-                    # ── Post-download validation ───────────────────────────
-                    # Extract full-image perceptual stats and reject candidates
-                    # that don't satisfy the selected mood/palette thresholds.
+                    # ── Post-download adaptive validation ─────────────────
                     img_stats = compute_image_stats_from_file(temp_path)
                     if img_stats is not None:
                         passes, reason = validate_image_matches_selection(
                             img_stats,
                             target_palette=color,
                             target_mood=mood,
+                            attempt=attempt,
+                            allow_soft=(attempt >= 3),
                         )
+                        comp_score = compute_image_compatibility_score(img_stats, color, mood)
+
                         if not passes:
-                            # Clean up the rejected download
-                            try:
-                                temp_path.unlink()
-                            except Exception:
-                                pass
+                            # Keep track of closest matching candidate for guaranteed delivery
+                            if best_candidate_info is None or comp_score < best_candidate_info[2]:
+                                if best_candidate_info is not None and best_candidate_info[1] != temp_path:
+                                    try:
+                                        best_candidate_info[1].unlink()
+                                    except Exception:
+                                        pass
+                                best_candidate_info = (candidate, temp_path, comp_score)
+                            else:
+                                if best_candidate_info is None or best_candidate_info[1] != temp_path:
+                                    try:
+                                        temp_path.unlink()
+                                    except Exception:
+                                        pass
+
                             accumulated_excludes.add(candidate.id)
                             if status_callback:
                                 status_callback(
@@ -328,6 +389,14 @@ class ProviderRouter:
                                     total_attempts,
                                 )
                             continue
+
+                    # If candidate passed validation and we had a previous best_candidate_info temp file, clean it up
+                    if best_candidate_info is not None and best_candidate_info[1] != temp_path:
+                        try:
+                            best_candidate_info[1].unlink()
+                        except Exception:
+                            pass
+                        best_candidate_info = None
 
                     # Extract dominant color for metadata
                     dom_rgb = extract_dominant_color_from_file(temp_path)
@@ -363,5 +432,55 @@ class ProviderRouter:
                         total_attempts,
                     )
                 time.sleep(1.0)
+
+        # ── Guaranteed Delivery Fallback ──────────────────────────────────
+        # If all attempts exhausted and strictly rejected, deliver the closest candidate
+        if best_candidate_info is not None:
+            best_cand, best_temp_path, best_score = best_candidate_info
+            if best_temp_path.exists():
+                if status_callback:
+                    status_callback(
+                        f"Guaranteed Delivery: using closest matching wallpaper (distance penalty: {best_score:.2f})...",
+                        total_attempts,
+                        total_attempts,
+                    )
+                try:
+                    dom_rgb = extract_dominant_color_from_file(best_temp_path)
+                    best_cand.dominant_color_hex = rgb_to_hex(*dom_rgb)
+                    metadata = self.cache.atomic_save_download(
+                        candidate=best_cand,
+                        temp_download_path=best_temp_path,
+                        mode=mode,
+                    )
+                    if metadata:
+                        metadata.dominant_color_hex = best_cand.dominant_color_hex
+                        if mood and mood != WallpaperMood.ANY:
+                            metadata.mood = mood.value
+                        if active_season:
+                            metadata.season = active_season.value
+                        self.history.record(
+                            item_id=best_cand.id,
+                            category=category.value,
+                            sha256=metadata.sha256,
+                            title=metadata.title,
+                        )
+                        return metadata, None
+                except Exception:
+                    pass
+                finally:
+                    if best_temp_path.exists():
+                        try:
+                            best_temp_path.unlink()
+                        except Exception:
+                            pass
+
+        # Local cache fallback if all network downloads failed
+        fallback_file = self.cache.get_fallback_wallpaper()
+        if fallback_file and fallback_file.exists():
+            if status_callback:
+                status_callback("Using cached wallpaper as fallback...", total_attempts, total_attempts)
+            fb_meta = self.cache.store_local_image(fallback_file, mode=mode)
+            if fb_meta:
+                return fb_meta, None
 
         return None, f"Failed to acquire {category.value} wallpaper after {total_attempts} attempts."
