@@ -305,6 +305,9 @@ def apply_update(
 def restart_application() -> None:
     """Safely restart the application in a clean detached process and exit current process."""
     try:
+        project_root = Path(__file__).resolve().parents[3]
+        cwd_dir = str(project_root) if project_root.exists() else None
+
         # Prefer pythonw.exe on Windows to prevent terminal window flash
         python_exe = sys.executable
         if sys.platform == "win32":
@@ -315,14 +318,26 @@ def restart_application() -> None:
         cmd = [python_exe, "-m", "login_wallpaper_selector"]
         if sys.platform == "win32":
             # DETACHED_PROCESS flag = 0x00000008, CREATE_NEW_PROCESS_GROUP = 0x00000200
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP
+                | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            )
             subprocess.Popen(
                 cmd,
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                cwd=cwd_dir,
+                creationflags=creation_flags,
                 close_fds=True,
             )
         else:
-            subprocess.Popen(cmd, start_new_session=True)
-    except Exception:
-        pass
+            subprocess.Popen(cmd, cwd=cwd_dir, start_new_session=True)
+    except Exception as e:
+        logger.error(f"Failed to spawn restart process: {e}")
+        try:
+            subprocess.Popen([sys.executable, "-m", "login_wallpaper_selector"])
+        except Exception:
+            pass
     finally:
-        sys.exit(0)
+        # CRITICAL: sys.exit(0) only raises SystemExit in the calling thread if called from
+        # a background worker thread, leaving the main Tkinter event loop running!
+        # os._exit(0) guarantees immediate, clean termination of the entire old process.
+        os._exit(0)

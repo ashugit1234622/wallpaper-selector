@@ -38,20 +38,20 @@ def test_check_for_updates_detects_newer_release():
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
-        "tag_name": "v1.1.0",
-        "name": "Version 1.1.0 - Major Features",
+        "tag_name": "v2.0.0",
+        "name": "Version 2.0.0 - Major Features",
         "body": "Added advanced multi-monitor support and live previews.",
         "published_at": "2026-10-23T12:00:00Z",
-        "html_url": "https://github.com/ashugit1234622/wallpaper-selector/releases/tag/v1.1.0",
-        "zipball_url": "https://api.github.com/repos/ashugit1234622/wallpaper-selector/zipball/v1.1.0",
+        "html_url": "https://github.com/ashugit1234622/wallpaper-selector/releases/tag/v2.0.0",
+        "zipball_url": "https://api.github.com/repos/ashugit1234622/wallpaper-selector/zipball/v2.0.0",
     }
 
     with patch("httpx.Client.get", return_value=mock_resp):
         res = check_for_updates(cfg, force=True)
         assert res.update_available is True
-        assert res.latest_version == "1.1.0"
+        assert res.latest_version == "2.0.0"
         assert "multi-monitor" in res.release_notes
-        assert res.html_url.endswith("/v1.1.0")
+        assert res.html_url.endswith("/v2.0.0")
 
 
 def test_check_for_updates_ignores_current_or_older_release():
@@ -92,3 +92,18 @@ def test_check_for_updates_throttles_automated_checks():
     res = check_for_updates(cfg, force=False)
     assert res.update_available is False
     assert "Throttled" in (res.error or "")
+
+
+def test_restart_application_spawns_process_and_exits(monkeypatch):
+    from login_wallpaper_selector.core.updater import restart_application
+
+    mock_popen = MagicMock()
+    mock_exit = MagicMock()
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+    monkeypatch.setattr("os._exit", mock_exit)
+
+    restart_application()
+    assert mock_popen.called
+    assert mock_exit.called
+    mock_exit.assert_called_with(0)
+

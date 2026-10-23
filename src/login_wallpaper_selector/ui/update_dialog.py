@@ -166,7 +166,7 @@ class UpdateModalDialog:
             if success:
                 _progress("✓ Update complete! Restarting application in 2 seconds...", 1.0)
                 time.sleep(2.0)
-                restart_application()
+                self.window.after(0, self._perform_restart)
             else:
                 # Clean error message: grab informative last line to keep dialog uncluttered
                 clean_err = "Unknown error"
@@ -188,4 +188,18 @@ class UpdateModalDialog:
                 self.window.after(0, _re_enable)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _perform_restart(self) -> None:
+        """Close modal and parent window cleanly, then execute detached restart."""
+        try:
+            self.window.destroy()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "parent") and self.parent:
+                self.parent.destroy()
+        except Exception:
+            pass
+        restart_application()
+
 
