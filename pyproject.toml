@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "login-wallpaper-selector"
-version = "1.0.0"
+version = "1.0.2"
 description = "A reliable desktop application that lets logged-in users choose a wallpaper category and automatically updates the desktop background."
 readme = "README.md"
 requires-python = ">=3.10"

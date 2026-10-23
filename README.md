@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg?style=for-the-badge)](https://github.com/ashugit1234622/wallpaper-selector/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg?style=for-the-badge)](https://github.com/ashugit1234622/wallpaper-selector/releases)
 [![Python](https://img.shields.io/badge/python-3.10+-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20%7C%20Linux%20%7C%20macOS-0078d6.svg?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ashugit1234622/wallpaper-selector)
