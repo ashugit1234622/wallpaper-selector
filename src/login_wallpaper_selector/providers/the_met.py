@@ -6,7 +6,9 @@ from typing import List, Optional, Set
 import httpx
 
 from .base import BaseImageProvider
-from ..core.models import WallpaperCategory, WallpaperCandidate
+from ..core.models import WallpaperCategory, WallpaperCandidate, ColorPalette, WallpaperMood
+from ..core.color_analyzer import get_palette_keyword
+from ..core.mood_matcher import augment_query_with_mood
 
 
 class TheMetImageProvider(BaseImageProvider):
@@ -51,6 +53,10 @@ class TheMetImageProvider(BaseImageProvider):
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[ColorPalette] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
         if not self.supports_category(category):
             return []
@@ -64,6 +70,14 @@ class TheMetImageProvider(BaseImageProvider):
             search_query = query or random.choice(self.PORTRAIT_QUERIES)
         else:
             return []
+
+        if mood and mood != WallpaperMood.ANY:
+            search_query = augment_query_with_mood(search_query, mood, category)
+
+        if color and color != ColorPalette.ANY:
+            color_kw = get_palette_keyword(color)
+            if color_kw:
+                search_query = f"{search_query} {color_kw}"
 
         search_params = {
             "hasImages": "true",

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .core.config import AppConfig
-from .core.models import WallpaperCategory, WallpaperPosition
+from .core.models import WallpaperCategory, WallpaperPosition, ColorPalette, WallpaperMood
 from .core.session import SessionDetector
 from .core.cache import CacheManager
 from .core.history import HistoryTracker
@@ -171,7 +171,14 @@ def create_desktop_shortcut() -> int:
         return 1
 
 
-def set_category_headless(category_str: str, mode: Optional[str] = None, also_lockscreen: bool = False) -> int:
+def set_category_headless(
+    category_str: str,
+    mode: Optional[str] = None,
+    also_lockscreen: bool = False,
+    color_str: Optional[str] = None,
+    mood_str: Optional[str] = None,
+    layout_aware: Optional[bool] = None,
+) -> int:
     """Directly fetch and apply a category wallpaper headlessly."""
     category = None
     for c in WallpaperCategory:
@@ -183,14 +190,32 @@ def set_category_headless(category_str: str, mode: Optional[str] = None, also_lo
         print(f"Invalid online category '{category_str}'. Choose from: Space, Nature, Art, Portrait.")
         return 1
 
+    color_palette = None
+    if color_str:
+        for p in ColorPalette:
+            if p.value.lower() == color_str.lower():
+                color_palette = p
+                break
+
+    wallpaper_mood = None
+    if mood_str:
+        for m in WallpaperMood:
+            if m.value.lower() == mood_str.lower():
+                wallpaper_mood = m
+                break
+
     config = AppConfig.load()
+    if layout_aware is not None:
+        config.desktop_layout_awareness = layout_aware
     history = HistoryTracker(config)
     cache = CacheManager(config)
     router = ProviderRouter(config, history, cache)
     adapter = get_wallpaper_adapter()
 
     pos_mode = mode or config.default_position
-    print(f"Acquiring {category.value} wallpaper (Mode: {pos_mode})...")
+    mood_desc = f" [{wallpaper_mood.value}]" if wallpaper_mood and wallpaper_mood != WallpaperMood.ANY else ""
+    color_desc = f" ({color_palette.value})" if color_palette and color_palette != ColorPalette.ANY else ""
+    print(f"Acquiring {category.value}{mood_desc}{color_desc} wallpaper (Mode: {pos_mode})...")
 
     def _cli_status(msg: str, attempt: int, total_attempts: int):
         print(f"  [{attempt}/{total_attempts}] {msg}")
@@ -199,6 +224,8 @@ def set_category_headless(category_str: str, mode: Optional[str] = None, also_lo
         category,
         mode=pos_mode,
         status_callback=_cli_status,
+        color=color_palette,
+        mood=wallpaper_mood,
     )
     if not meta:
         print(f"Failed to acquire wallpaper: {err}")
@@ -212,12 +239,48 @@ def set_category_headless(category_str: str, mode: Optional[str] = None, also_lo
             if lock_ok:
                 lock_msg = " & Lock Screen"
 
-        print(f"✓ Successfully applied '{meta.title}' ({meta.creator}){lock_msg}")
+        color_info = f" | Color: {meta.dominant_color_hex}" if getattr(meta, "dominant_color_hex", None) else ""
+        mood_info = f" | Mood: {meta.mood}" if getattr(meta, "mood", None) else ""
+        print(f"✓ Successfully applied '{meta.title}' ({meta.creator}){lock_msg}{mood_info}{color_info}")
         print(f"  License: {meta.license}")
         print(f"  Saved to: {meta.local_path}")
         return 0
     else:
         print("Failed to apply wallpaper via desktop adapter.")
+        return 1
+
+
+def run_rotation_daemon(check_interval_sec: int = 30) -> int:
+    """Run continuous wallpaper rotation daemon."""
+    from .core.scheduler import WallpaperRotationDaemon
+    config = AppConfig.load()
+    daemon = WallpaperRotationDaemon(config)
+    try:
+        daemon.run_loop(check_interval_sec=check_interval_sec)
+        return 0
+    except KeyboardInterrupt:
+        daemon.stop()
+        print("\nDaemon terminated by user.")
+        return 0
+
+
+def run_rotate_now() -> int:
+    """Trigger an immediate wallpaper rotation cycle."""
+    from .core.scheduler import WallpaperRotationDaemon
+    config = AppConfig.load()
+    daemon = WallpaperRotationDaemon(config)
+    print(f"Executing immediate wallpaper rotation (Interval: {config.rotation_interval_minutes}m)...")
+
+    def _status(msg, attempt, total):
+        print(f"  [{attempt}/{total}] {msg}")
+
+    meta, err = daemon.rotate_now(status_callback=_status)
+    if meta:
+        print(f"✓ Rotated to '{meta.title}' ({meta.category})")
+        print(f"  Saved to: {meta.local_path}")
+        return 0
+    else:
+        print(f"✗ Rotation failed: {err}")
         return 1
 
 
@@ -249,8 +312,23 @@ def main() -> None:
     parser.add_argument("--mode", type=str, choices=["Fill", "Fit"], help="Display mode (Fill or Fit)")
     parser.add_argument("--set-lockscreen", action="store_true", help="Also apply the fetched wallpaper to system lock screen")
     parser.add_argument("--create-shortcut", action="store_true", help="Create a desktop shortcut with custom icon to run the app")
+    parser.add_argument("--color", type=str, choices=["Any", "Blue", "Purple", "Green", "Warm", "Monochrome"], help="Filter by dominant color palette")
+    parser.add_argument("--mood", type=str, choices=["Any", "Peaceful", "Dark", "Cinematic", "Minimalist", "Vibrant"], help="Filter by wallpaper mood/aesthetic vibe")
+    parser.add_argument("--layout-aware", action="store_true", default=None, help="Align crop away from desktop icon clutter")
+    parser.add_argument("--no-layout-aware", action="store_false", dest="layout_aware", help="Disable layout-aware crop alignment")
+    parser.add_argument("--rotate-now", action="store_true", help="Instantly trigger one automated wallpaper rotation")
+    parser.add_argument("--daemon", action="store_true", help="Run background wallpaper rotation daemon")
+    parser.add_argument("--interval", type=str, help="Set rotation interval (e.g. 30m, 1h, 3h, daily)")
 
     args = parser.parse_args()
+
+    if args.interval:
+        from .core.scheduler import parse_interval_minutes
+        cfg = AppConfig.load()
+        cfg.rotation_interval_minutes = parse_interval_minutes(args.interval)
+        cfg.rotation_enabled = True
+        cfg.save()
+        print(f"✓ Updated rotation interval to {cfg.rotation_interval_minutes} minutes (Enabled: True).")
 
     if args.check:
         sys.exit(run_check())
@@ -263,8 +341,12 @@ def main() -> None:
         sys.exit(deregister_autostart())
     elif args.create_shortcut:
         sys.exit(create_desktop_shortcut())
+    elif args.rotate_now:
+        sys.exit(run_rotate_now())
+    elif args.daemon:
+        sys.exit(run_rotation_daemon())
     elif args.set_category:
-        sys.exit(set_category_headless(args.set_category, args.mode, args.set_lockscreen))
+        sys.exit(set_category_headless(args.set_category, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware))
     else:
         # Default action: launch GUI dialog
         launch_gui(is_login=args.on_login)

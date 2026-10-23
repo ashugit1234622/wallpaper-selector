@@ -7,7 +7,9 @@ from typing import List, Optional, Set
 import httpx
 
 from .base import BaseImageProvider
-from ..core.models import WallpaperCategory, WallpaperCandidate
+from ..core.models import WallpaperCategory, WallpaperCandidate, ColorPalette, WallpaperMood
+from ..core.color_analyzer import get_wallhaven_color_code
+from ..core.mood_matcher import augment_query_with_mood
 
 
 class WallhavenProvider(BaseImageProvider):
@@ -47,6 +49,10 @@ class WallhavenProvider(BaseImageProvider):
         query: Optional[str] = None,
         limit: int = 15,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[ColorPalette] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
         if not self.supports_category(category):
             return []
@@ -71,6 +77,9 @@ class WallhavenProvider(BaseImageProvider):
         else:
             return []
 
+        if mood and mood != WallpaperMood.ANY:
+            search_query = augment_query_with_mood(search_query, mood, category)
+
         params = {
             "q": search_query,
             "categories": cat_flag,
@@ -80,6 +89,12 @@ class WallhavenProvider(BaseImageProvider):
             "sorting": "random",
             "seed": self._generate_seed(),
         }
+
+        # Apply color filter if selected
+        if color and color != ColorPalette.ANY:
+            color_code = get_wallhaven_color_code(color, custom_color_hex)
+            if color_code:
+                params["colors"] = color_code
 
         headers = {"User-Agent": self.USER_AGENT}
 

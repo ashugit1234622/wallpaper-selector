@@ -14,10 +14,15 @@ from .artic import ArtInstituteChicagoProvider
 from .wallhaven import WallhavenProvider
 from .the_met import TheMetImageProvider
 from .bing import BingImageProvider
-from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata
+from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata, ColorPalette, WallpaperMood
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
 from ..core.cache import CacheManager
+from ..core.color_analyzer import (
+    extract_dominant_color_from_file,
+    rgb_to_hex,
+    compute_color_match_score,
+)
 
 
 class ProviderRouter:
@@ -50,7 +55,14 @@ class ProviderRouter:
             return [self.the_met, self.wallhaven, self.wikimedia]
         return []
 
-    def fetch_candidates(self, category: WallpaperCategory, limit: int = 10) -> List[WallpaperCandidate]:
+    def fetch_candidates(
+        self,
+        category: WallpaperCategory,
+        limit: int = 10,
+        color: Optional[ColorPalette] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+    ) -> List[WallpaperCandidate]:
         """Fetch candidate images for a category, interleaving results across available providers."""
         providers = self.get_providers_for_category(category)
         if not providers:
@@ -69,6 +81,9 @@ class ProviderRouter:
                     category=category,
                     limit=target_per_provider,
                     exclude_ids=exclude_ids,
+                    color=color,
+                    custom_color_hex=custom_color_hex,
+                    mood=mood,
                 )
                 if candidates:
                     provider_candidates.append(candidates)
@@ -89,6 +104,9 @@ class ProviderRouter:
                         category=category,
                         limit=limit,
                         exclude_ids=set(),
+                        color=color,
+                        custom_color_hex=custom_color_hex,
+                        mood=mood,
                     )
                     if candidates:
                         all_candidates.extend(candidates)
@@ -141,6 +159,9 @@ class ProviderRouter:
         progress_callback: Optional[callable] = None,
         status_callback: Optional[callable] = None,
         max_retries: Optional[int] = None,
+        color: Optional[ColorPalette] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
         """Fetch, download, validate, cache, and record a wallpaper for an online category with retries.
         
@@ -154,13 +175,24 @@ class ProviderRouter:
 
         for attempt in range(1, total_attempts + 1):
             if status_callback:
+                mood_info = f" [{mood.value}]" if mood and mood != WallpaperMood.ANY else ""
+                color_info = f" ({color.value})" if color and color != ColorPalette.ANY else ""
                 status_callback(
-                    f"Attempt {attempt}/{total_attempts}: Finding {category.value} wallpaper...",
+                    f"Attempt {attempt}/{total_attempts}: Finding {category.value}{mood_info}{color_info} wallpaper...",
                     attempt,
                     total_attempts,
                 )
 
-            candidates = self.fetch_candidates(category, limit=6)
+            try:
+                candidates = self.fetch_candidates(
+                    category,
+                    limit=6,
+                    color=color,
+                    custom_color_hex=custom_color_hex,
+                    mood=mood,
+                )
+            except TypeError:
+                candidates = self.fetch_candidates(category, limit=6)
             # Filter out any candidates that already failed in previous attempts
             valid_candidates = [c for c in candidates if c.id not in accumulated_excludes]
 
@@ -176,6 +208,10 @@ class ProviderRouter:
                         accumulated_excludes.add(candidate.id)
                         continue
 
+                    # Extract dominant color from downloaded file
+                    dom_rgb = extract_dominant_color_from_file(temp_path)
+                    candidate.dominant_color_hex = rgb_to_hex(*dom_rgb)
+
                     metadata = self.cache.atomic_save_download(
                         candidate=candidate,
                         temp_download_path=temp_path,
@@ -183,7 +219,15 @@ class ProviderRouter:
                     )
 
                     if metadata:
-                        self.history.record(candidate.id)
+                        metadata.dominant_color_hex = candidate.dominant_color_hex
+                        if mood and mood != WallpaperMood.ANY:
+                            metadata.mood = mood.value
+                        self.history.record(
+                            item_id=candidate.id,
+                            category=category.value,
+                            sha256=metadata.sha256,
+                            title=metadata.title,
+                        )
                         return metadata, None
                     else:
                         accumulated_excludes.add(candidate.id)

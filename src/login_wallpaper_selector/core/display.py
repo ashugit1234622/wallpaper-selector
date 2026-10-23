@@ -62,10 +62,11 @@ def render_wallpaper_for_screen(
     target_width: int,
     target_height: int,
     mode: str = WallpaperPosition.FILL.value,
+    layout_aware: bool = True,
 ) -> bool:
     """Render an image to match the monitor's exact native resolution 1:1.
     
-    Fill: Proportional resize and center-crop to exact target_width x target_height.
+    Fill: Proportional resize and layout-aware crop to exact target_width x target_height.
     Fit: Proportional resize to fit inside target_width x target_height, centered on a clean background canvas.
     """
     try:
@@ -93,8 +94,26 @@ def render_wallpaper_for_screen(
                     new_h = max(target_height, int(src_h * (target_width / src_w)))
 
                 resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                left = (new_w - target_width) // 2
-                top = (new_h - target_height) // 2
+
+                if layout_aware and (new_w > target_width or new_h > target_height):
+                    try:
+                        from .layout_awareness import (
+                            analyze_desktop_layout,
+                            compute_image_saliency_focal_point,
+                            calculate_smart_crop_offset,
+                        )
+                        focal_point = compute_image_saliency_focal_point(img)
+                        profile = analyze_desktop_layout()
+                        left, top = calculate_smart_crop_offset(
+                            new_w, new_h, target_width, target_height, focal_point, profile
+                        )
+                    except Exception:
+                        left = (new_w - target_width) // 2
+                        top = (new_h - target_height) // 2
+                else:
+                    left = (new_w - target_width) // 2
+                    top = (new_h - target_height) // 2
+
                 final_img = resized.crop((left, top, left + target_width, top + target_height))
 
             else:

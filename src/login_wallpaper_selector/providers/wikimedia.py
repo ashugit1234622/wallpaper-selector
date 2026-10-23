@@ -8,8 +8,9 @@ import httpx
 
 from .base import BaseImageProvider
 from .license import LicenseValidator
-from ..core.models import WallpaperCategory, WallpaperCandidate, ImageDimensions
+from ..core.models import WallpaperCategory, WallpaperCandidate, ImageDimensions, WallpaperMood
 from ..core.display import get_native_screen_resolution
+from ..core.mood_matcher import augment_query_with_mood
 
 
 class WikimediaCommonsProvider(BaseImageProvider):
@@ -56,12 +57,18 @@ class WikimediaCommonsProvider(BaseImageProvider):
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[Any] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
         if not self.supports_category(category):
             return []
 
         queries = self.CATEGORY_QUERIES.get(category, [])
         search_query = query or (random.choice(queries) if queries else "landscape")
+        if mood and mood != WallpaperMood.ANY:
+            search_query = augment_query_with_mood(search_query, mood, category)
         exclude = exclude_ids or set()
         candidates: List[WallpaperCandidate] = []
 

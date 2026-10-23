@@ -18,7 +18,7 @@ except ImportError:
 import tkinter as tk
 from tkinter import messagebox
 
-from ..core.models import WallpaperCategory, WallpaperPosition, WallpaperMetadata
+from ..core.models import WallpaperCategory, WallpaperPosition, WallpaperMetadata, ColorPalette, WallpaperMood
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
 from ..core.cache import CacheManager
@@ -39,6 +39,8 @@ class WallpaperSelectorDialog:
 
         self.current_category: Optional[WallpaperCategory] = None
         self.current_metadata: Optional[WallpaperMetadata] = None
+        self.selected_color: ColorPalette = ColorPalette.ANY
+        self.selected_mood: WallpaperMood = WallpaperMood.ANY
         self.is_busy = False
 
         self._init_window()
@@ -52,8 +54,8 @@ class WallpaperSelectorDialog:
             self.root = tk.Tk()
 
         self.root.title("Choose Your Wallpaper")
-        self.root.geometry("640x740")
-        self.root.minsize(600, 700)
+        self.root.geometry("640x780")
+        self.root.minsize(600, 740)
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
 
@@ -211,6 +213,98 @@ class WallpaperSelectorDialog:
         btn_grid.columnconfigure(0, weight=1)
         btn_grid.columnconfigure(1, weight=1)
 
+        # Color Palette Swatch Bar
+        color_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        color_frame.pack(fill="x", padx=24, pady=(2, 6))
+
+        color_lbl = (
+            ctk.CTkLabel(color_frame, text="🎨 Color:", font=ctk.CTkFont(size=12, weight="bold"))
+            if HAS_CUSTOMTKINTER
+            else tk.Label(color_frame, text="🎨 Color:", font=("Helvetica", 9, "bold"))
+        )
+        color_lbl.pack(side="left", padx=(4, 8))
+
+        palettes = [
+            (ColorPalette.ANY, "🔘 Any", "#374151"),
+            (ColorPalette.BLUE, "🔵 Blue", "#0284c7"),
+            (ColorPalette.PURPLE, "🟣 Purple", "#a855f7"),
+            (ColorPalette.GREEN, "🟢 Green", "#10b981"),
+            (ColorPalette.WARM, "🟠 Warm", "#ea580c"),
+            (ColorPalette.MONOCHROME, "⚫ Dark", "#27272a"),
+        ]
+
+        self.color_chips = {}
+        for pal, label, bg_color in palettes:
+            if HAS_CUSTOMTKINTER:
+                chip = ctk.CTkButton(
+                    color_frame,
+                    text=label,
+                    width=72,
+                    height=28,
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color=bg_color if pal == self.selected_color else "#1f2937",
+                    hover_color=bg_color,
+                    border_width=2 if pal == self.selected_color else 0,
+                    border_color="#38bdf8",
+                    command=lambda p=pal: self.on_select_color(p),
+                )
+                chip.pack(side="left", padx=3)
+            else:
+                chip = tk.Button(
+                    color_frame,
+                    text=label,
+                    bg=bg_color if pal == self.selected_color else "#ddd",
+                    command=lambda p=pal: self.on_select_color(p),
+                )
+                chip.pack(side="left", padx=2)
+            self.color_chips[pal] = chip
+
+        # Mood Selector Bar ("What's your mood?")
+        mood_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        mood_frame.pack(fill="x", padx=24, pady=(2, 6))
+
+        mood_lbl = (
+            ctk.CTkLabel(mood_frame, text="🎭 Mood:", font=ctk.CTkFont(size=12, weight="bold"))
+            if HAS_CUSTOMTKINTER
+            else tk.Label(mood_frame, text="🎭 Mood:", font=("Helvetica", 9, "bold"))
+        )
+        mood_lbl.pack(side="left", padx=(4, 8))
+
+        moods = [
+            (WallpaperMood.ANY, "✨ Any", "#374151"),
+            (WallpaperMood.PEACEFUL, "🕊️ Calm", "#0d9488"),
+            (WallpaperMood.DARK, "🌑 Dark", "#18181b"),
+            (WallpaperMood.CINEMATIC, "🎬 Epic", "#4f46e5"),
+            (WallpaperMood.MINIMALIST, "◻️ Minimal", "#52525b"),
+            (WallpaperMood.VIBRANT, "🌈 Vivid", "#d97706"),
+        ]
+
+        self.mood_chips = {}
+        for mood, label, bg_color in moods:
+            if HAS_CUSTOMTKINTER:
+                chip = ctk.CTkButton(
+                    mood_frame,
+                    text=label,
+                    width=72,
+                    height=28,
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color=bg_color if mood == self.selected_mood else "#1f2937",
+                    hover_color=bg_color,
+                    border_width=2 if mood == self.selected_mood else 0,
+                    border_color="#a855f7",
+                    command=lambda m=mood: self.on_select_mood(m),
+                )
+                chip.pack(side="left", padx=3)
+            else:
+                chip = tk.Button(
+                    mood_frame,
+                    text=label,
+                    bg=bg_color if mood == self.selected_mood else "#ddd",
+                    command=lambda m=mood: self.on_select_mood(m),
+                )
+                chip.pack(side="left", padx=2)
+            self.mood_chips[mood] = chip
+
         # Settings row: Mode selection (Fill / Fit)
         settings_frame = ctk.CTkFrame(self.root) if HAS_CUSTOMTKINTER else tk.Frame(self.root)
         settings_frame.pack(fill="x", padx=24, pady=(5, 10))
@@ -240,7 +334,17 @@ class WallpaperSelectorDialog:
                 font=ctk.CTkFont(size=12),
                 command=self.on_lockscreen_toggle,
             )
-            self.lockscreen_chk.pack(side="right", padx=12, pady=8)
+            self.lockscreen_chk.pack(side="right", padx=10, pady=8)
+
+            self.layout_var = ctk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
+            self.layout_chk = ctk.CTkCheckBox(
+                settings_frame,
+                text="Layout Aware",
+                variable=self.layout_var,
+                font=ctk.CTkFont(size=12),
+                command=self.on_layout_toggle,
+            )
+            self.layout_chk.pack(side="right", padx=6, pady=8)
         else:
             self.mode_var = tk.StringVar(value=self.config.default_position)
             for m in [WallpaperPosition.FILL.value, WallpaperPosition.FIT.value]:
@@ -254,7 +358,76 @@ class WallpaperSelectorDialog:
                 variable=self.lockscreen_var,
                 command=self.on_lockscreen_toggle,
             )
-            self.lockscreen_chk.pack(side="right", padx=12, pady=8)
+            self.lockscreen_chk.pack(side="right", padx=10, pady=8)
+
+            self.layout_var = tk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
+            self.layout_chk = tk.Checkbutton(
+                settings_frame,
+                text="Layout Aware",
+                variable=self.layout_var,
+                command=self.on_layout_toggle,
+            )
+            self.layout_chk.pack(side="right", padx=6, pady=8)
+
+        # Auto-Rotation Controls Bar
+        rotate_frame = ctk.CTkFrame(self.root) if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        rotate_frame.pack(fill="x", padx=24, pady=(2, 8))
+
+        self.rotate_var = ctk.BooleanVar(value=bool(getattr(self.config, "rotation_enabled", False)))
+        if HAS_CUSTOMTKINTER:
+            self.rotate_chk = ctk.CTkCheckBox(
+                rotate_frame,
+                text="⏱️ Auto-Rotate",
+                variable=self.rotate_var,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=self.on_rotate_toggle,
+            )
+            self.rotate_chk.pack(side="left", padx=12, pady=6)
+        else:
+            self.rotate_chk = tk.Checkbutton(
+                rotate_frame,
+                text="⏱️ Auto-Rotate",
+                variable=self.rotate_var,
+                command=self.on_rotate_toggle,
+            )
+            self.rotate_chk.pack(side="left", padx=12, pady=6)
+
+        curr_min = getattr(self.config, "rotation_interval_minutes", 180)
+        curr_str = "30m" if curr_min == 30 else ("1h" if curr_min == 60 else ("daily" if curr_min >= 1440 else "3h"))
+
+        if HAS_CUSTOMTKINTER:
+            self.interval_var = ctk.StringVar(value=curr_str)
+            self.interval_seg = ctk.CTkSegmentedButton(
+                rotate_frame,
+                values=["30m", "1h", "3h", "daily"],
+                variable=self.interval_var,
+                command=self.on_interval_change,
+            )
+            self.interval_seg.pack(side="left", padx=8, pady=6)
+
+            self.rotate_now_btn = ctk.CTkButton(
+                rotate_frame,
+                text="🔄 Rotate Now",
+                width=110,
+                height=28,
+                font=ctk.CTkFont(size=12, weight="bold"),
+                fg_color="#4f46e5",
+                hover_color="#4338ca",
+                command=self.on_rotate_now,
+            )
+            self.rotate_now_btn.pack(side="right", padx=12, pady=6)
+        else:
+            self.interval_var = tk.StringVar(value=curr_str)
+            for iv_label in ["30m", "1h", "3h", "daily"]:
+                rb = tk.Radiobutton(rotate_frame, text=iv_label, value=iv_label, variable=self.interval_var, command=self.on_interval_change)
+                rb.pack(side="left", padx=4)
+
+            self.rotate_now_btn = tk.Button(
+                rotate_frame,
+                text="🔄 Rotate Now",
+                command=self.on_rotate_now,
+            )
+            self.rotate_now_btn.pack(side="right", padx=12, pady=6)
 
         # Preview Container
         self.preview_frame = ctk.CTkFrame(self.root, height=165) if HAS_CUSTOMTKINTER else tk.Frame(self.root, height=165, bg="black")
@@ -344,6 +517,108 @@ class WallpaperSelectorDialog:
             ok = self.adapter.set_lockscreen(Path(self.current_metadata.local_path))
             if ok:
                 self.set_status("✓ Applied current wallpaper to Lock Screen.")
+
+    def on_layout_toggle(self) -> None:
+        """Handle toggling of desktop layout awareness."""
+        enabled = self.layout_var.get()
+        self.config.desktop_layout_awareness = enabled
+        self.config.save()
+        status_text = "Layout Awareness: Enabled (Smart Crop away from desktop icons)" if enabled else "Layout Awareness: Disabled (Center Crop)"
+        self.set_status(status_text)
+
+    def on_rotate_toggle(self) -> None:
+        """Handle toggling of scheduled auto-rotation."""
+        enabled = bool(self.rotate_var.get())
+        self.config.rotation_enabled = enabled
+        self.config.save()
+        desc = f"Enabled ({self.config.rotation_interval_minutes}m interval)" if enabled else "Disabled"
+        self.set_status(f"Auto-Rotation: {desc}.")
+
+    def on_interval_change(self, val: str) -> None:
+        """Handle change in rotation interval."""
+        from ..core.scheduler import parse_interval_minutes
+        self.config.rotation_interval_minutes = parse_interval_minutes(val)
+        self.config.save()
+        self.set_status(f"Rotation interval updated to {self.config.rotation_interval_minutes} minutes.")
+
+    def on_rotate_now(self) -> None:
+        """Trigger an instant wallpaper rotation in background worker thread."""
+        if self.is_busy:
+            return
+
+        self.set_busy(True)
+        self.set_status("Rotating wallpaper now...", progress=0.1)
+
+        def _worker():
+            from ..core.scheduler import WallpaperRotationDaemon
+            daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+
+            def _progress(downloaded: int, total: int):
+                frac = min(0.9, 0.2 + (downloaded / total) * 0.7) if total > 0 else 0.5
+                kb = downloaded // 1024
+                self.set_status(f"Rotating wallpaper ({kb} KB)...", progress=frac)
+
+            def _status(msg: str, attempt: int, total_attempts: int):
+                self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
+
+            meta, err = daemon.rotate_now(
+                color=self.selected_color,
+                mood=self.selected_mood,
+                progress_callback=_progress,
+                status_callback=_status,
+            )
+
+            if meta:
+                self.current_metadata = meta
+                self.set_status(f"✓ Rotated to: {meta.title} ({meta.category})", progress=1.0)
+                self._update_preview_and_attribution(meta)
+            else:
+                self.set_status(f"Rotation failed: {err}")
+            self.set_busy(False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def on_select_color(self, palette: ColorPalette) -> None:
+        """Handle user selection of dominant color palette."""
+        self.selected_color = palette
+        palette_colors = {
+            ColorPalette.ANY: "#374151",
+            ColorPalette.BLUE: "#0284c7",
+            ColorPalette.PURPLE: "#a855f7",
+            ColorPalette.GREEN: "#10b981",
+            ColorPalette.WARM: "#ea580c",
+            ColorPalette.MONOCHROME: "#27272a",
+        }
+        for pal, chip in self.color_chips.items():
+            is_active = (pal == palette)
+            if HAS_CUSTOMTKINTER:
+                chip.configure(
+                    border_width=2 if is_active else 0,
+                    fg_color=palette_colors.get(pal, "#374151") if is_active else "#1f2937",
+                )
+        desc = "No color filter" if palette == ColorPalette.ANY else f"{palette.value} color filter"
+        self.set_status(f"Palette updated: {desc}.")
+
+    def on_select_mood(self, mood: WallpaperMood) -> None:
+        """Handle user selection of mood/aesthetic vibe."""
+        self.selected_mood = mood
+        mood_colors = {
+            WallpaperMood.ANY: "#374151",
+            WallpaperMood.PEACEFUL: "#0d9488",
+            WallpaperMood.DARK: "#18181b",
+            WallpaperMood.CINEMATIC: "#4f46e5",
+            WallpaperMood.MINIMALIST: "#52525b",
+            WallpaperMood.VIBRANT: "#d97706",
+        }
+        for m, chip in self.mood_chips.items():
+            is_active = (m == mood)
+            if HAS_CUSTOMTKINTER:
+                chip.configure(
+                    border_width=2 if is_active else 0,
+                    fg_color=mood_colors.get(m, "#374151") if is_active else "#1f2937",
+                )
+        desc = "No mood filter" if mood == WallpaperMood.ANY else f"{mood.value} mood"
+        self.set_status(f"Mood updated: {desc}.")
 
     def on_save_wallpaper(self) -> None:
         """Save the active wallpaper permanently to category's Saved folder."""
@@ -443,6 +718,8 @@ class WallpaperSelectorDialog:
                 mode=mode,
                 progress_callback=_progress,
                 status_callback=_status,
+                color=self.selected_color,
+                mood=self.selected_mood,
             )
 
             if meta:

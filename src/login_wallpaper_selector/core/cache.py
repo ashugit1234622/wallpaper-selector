@@ -108,6 +108,7 @@ class CacheManager:
             target_width=screen_w,
             target_height=screen_h,
             mode=mode,
+            layout_aware=getattr(self.config, "desktop_layout_awareness", True),
         )
 
         if not render_ok:
@@ -176,6 +177,7 @@ class CacheManager:
                 target_width=screen_w,
                 target_height=screen_h,
                 mode=mode,
+                layout_aware=getattr(self.config, "desktop_layout_awareness", True),
             )
 
             if render_ok:

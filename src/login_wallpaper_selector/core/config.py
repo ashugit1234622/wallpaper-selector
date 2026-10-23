@@ -23,6 +23,12 @@ class AppConfig:
     custom_cache_dir: Optional[str] = None
     max_fetch_retries: int = 5
     also_set_lockscreen: bool = False
+    anti_repetition_days: int = 14
+    anti_repetition_enabled: bool = True
+    desktop_layout_awareness: bool = True
+    rotation_enabled: bool = False
+    rotation_interval_minutes: int = 180
+    rotation_category: str = "Any"
 
     @classmethod
     def get_config_file_path(cls) -> Path:
@@ -64,6 +70,12 @@ class AppConfig:
                 custom_cache_dir=data.get("custom_cache_dir"),
                 max_fetch_retries=int(data.get("max_fetch_retries", 5)),
                 also_set_lockscreen=bool(data.get("also_set_lockscreen", False)),
+                anti_repetition_days=int(data.get("anti_repetition_days", 14)),
+                anti_repetition_enabled=bool(data.get("anti_repetition_enabled", True)),
+                desktop_layout_awareness=bool(data.get("desktop_layout_awareness", True)),
+                rotation_enabled=bool(data.get("rotation_enabled", False)),
+                rotation_interval_minutes=int(data.get("rotation_interval_minutes", 180)),
+                rotation_category=str(data.get("rotation_category", "Any")),
             )
         except Exception:
             return cls()

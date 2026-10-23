@@ -8,7 +8,8 @@ import httpx
 
 from .base import BaseImageProvider
 from .license import LicenseValidator
-from ..core.models import WallpaperCategory, WallpaperCandidate
+from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMood
+from ..core.mood_matcher import augment_query_with_mood
 
 
 class NasaImageProvider(BaseImageProvider):
@@ -43,11 +44,17 @@ class NasaImageProvider(BaseImageProvider):
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[Any] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
         if not self.supports_category(category):
             return []
 
         search_query = query or random.choice(self.SPACE_QUERIES)
+        if mood and mood != WallpaperMood.ANY:
+            search_query = augment_query_with_mood(search_query, mood, category)
         exclude = exclude_ids or set()
         candidates: List[WallpaperCandidate] = []
 

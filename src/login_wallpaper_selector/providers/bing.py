@@ -32,6 +32,10 @@ class BingImageProvider(BaseImageProvider):
         query: Optional[str] = None,
         limit: int = 8,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[Any] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[Any] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
         if not self.supports_category(category):
             return []

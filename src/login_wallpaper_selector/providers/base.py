@@ -27,6 +27,13 @@ class BaseImageProvider(ABC):
         query: Optional[str] = None,
         limit: int = 15,
         exclude_ids: Optional[Set[str]] = None,
+        color: Optional[ColorPalette] = None,
+        custom_color_hex: Optional[str] = None,
+        mood: Optional[WallpaperMood] = None,
+        **kwargs,
     ) -> List[WallpaperCandidate]:
-        """Search and return valid, high-resolution landscape candidates."""
         pass
+
+    def supports_color_filtering(self) -> bool:
+        """Whether this provider supports palette or color query filtering."""
+        return True
