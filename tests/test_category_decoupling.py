@@ -117,3 +117,19 @@ def test_retry_when_category_off_fetches_random(monkeypatch):
 
     mock_fetch_random.assert_called_once_with(color=dialog.selected_color, mood=dialog.selected_mood)
 
+
+def test_suggestion_click_does_not_type_in_search_bar(monkeypatch):
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    dialog = WallpaperSelectorDialog(config=AppConfig())
+    dialog.search_entry = MagicMock()
+    dialog.on_trigger_search = MagicMock()
+
+    chip_btn = MagicMock()
+    dialog._on_suggestion_click("Alpine Mountains", chip_btn=chip_btn)
+
+    # Search bar should be cleared, NOT typed into with the suggestion
+    dialog.search_entry.delete.assert_called_once_with(0, "end")
+    assert not dialog.search_entry.insert.called
+    dialog.on_trigger_search.assert_called_once_with("Alpine Mountains")
+
+

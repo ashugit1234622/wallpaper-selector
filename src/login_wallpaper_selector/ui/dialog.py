@@ -1498,26 +1498,32 @@ class WallpaperSelectorDialog:
                     hover_color="#374151",
                     text_color="#e5e7eb",
                     corner_radius=11,
-                    command=lambda q=kw: self._on_suggestion_click(q),
                 )
+                btn.configure(command=lambda q=kw, b=btn: self._on_suggestion_click(q, b))
                 btn.pack(side="left", padx=2)
             else:
                 btn = tk.Button(
                     self.suggestions_frame,
                     text=kw,
                     font=("Helvetica", 8),
-                    command=lambda q=kw: self._on_suggestion_click(q),
                 )
+                btn.config(command=lambda q=kw, b=btn: self._on_suggestion_click(q, b))
                 btn.pack(side="left", padx=2)
             self.suggestion_buttons.append(btn)
 
-    def _on_suggestion_click(self, query: str) -> None:
-        """Handle click on a suggestion chip."""
+    def _on_suggestion_click(self, query: str, chip_btn: Optional[Any] = None) -> None:
+        """Handle click on a suggestion chip: clear search bar and search directly without typing into it."""
         if self.is_busy:
             return
         if hasattr(self, "search_entry"):
             self.search_entry.delete(0, tk.END)
-            self.search_entry.insert(0, query)
+
+        if chip_btn:
+            if HAS_CUSTOMTKINTER:
+                chip_btn.configure(border_width=2, border_color="#38bdf8", fg_color="#2563eb")
+            else:
+                chip_btn.config(relief="sunken", bg="#2563eb")
+
         self.on_trigger_search(query)
 
     def _fetch_random_wallpaper(
@@ -1700,7 +1706,7 @@ class WallpaperSelectorDialog:
         self.set_status("Search input cleared.")
 
     def on_retry(self) -> None:
-        active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else self.current_keyword
+        active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
         if active_kw:
             self.on_trigger_search(active_kw)
         elif self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
