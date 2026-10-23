@@ -48,12 +48,12 @@ class WikimediaCommonsProvider(BaseImageProvider):
     def name(self) -> str:
         return "Wikimedia Commons"
 
-    def supports_category(self, category: WallpaperCategory) -> bool:
-        return category in self.CATEGORY_QUERIES
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
+        return category is None or category in self.CATEGORY_QUERIES
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
@@ -65,8 +65,8 @@ class WikimediaCommonsProvider(BaseImageProvider):
         if not self.supports_category(category):
             return []
 
-        queries = self.CATEGORY_QUERIES.get(category, [])
-        search_query = query or (random.choice(queries) if queries else "landscape")
+        queries = self.CATEGORY_QUERIES.get(category, []) if category else []
+        search_query = query or (random.choice(queries) if queries else "scenic landscape wallpaper -nudity")
         if mood and mood != WallpaperMood.ANY:
             search_query = augment_query_with_mood(search_query, mood, category)
         if color and color != ColorPalette.ANY:

@@ -44,12 +44,12 @@ class TheMetImageProvider(BaseImageProvider):
     def name(self) -> str:
         return "The Metropolitan Museum of Art"
 
-    def supports_category(self, category: WallpaperCategory) -> bool:
-        return category in (WallpaperCategory.ART, WallpaperCategory.PORTRAIT)
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
+        return category is None or category in (WallpaperCategory.ART, WallpaperCategory.PORTRAIT)
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
@@ -129,7 +129,7 @@ class TheMetImageProvider(BaseImageProvider):
 
                         candidate = WallpaperCandidate(
                             id=candidate_id,
-                            category=category,
+                            category=category or WallpaperCategory.ART,
                             provider_name=self.name,
                             title=display_title,
                             download_url=primary_image,

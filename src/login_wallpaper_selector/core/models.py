@@ -95,11 +95,11 @@ class ImageDimensions:
 class WallpaperCandidate:
     """Represents a potential wallpaper discovered from a provider before download."""
     id: str
-    category: WallpaperCategory
-    provider_name: str
-    title: str
-    download_url: str
-    source_url: str
+    category: Optional[WallpaperCategory] = None
+    provider_name: str = ""
+    title: str = ""
+    download_url: str = ""
+    source_url: str = ""
     creator: str = "Unknown"
     license_name: str = "Unknown"
     license_url: Optional[str] = None

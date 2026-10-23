@@ -36,7 +36,10 @@ class CacheManager:
 
     def get_category_dir(self, category: Any) -> Path:
         """Return and ensure category-specific subfolder."""
-        cat_name = category.value if hasattr(category, "value") else str(category)
+        if category is None:
+            cat_name = "General"
+        else:
+            cat_name = category.value if hasattr(category, "value") else str(category)
         safe_name = cat_name.replace(" ", "_")
         cat_dir = self.cache_dir / safe_name
         cat_dir.mkdir(parents=True, exist_ok=True)
@@ -191,9 +194,10 @@ class CacheManager:
                 temp_download_path.replace(final_path)
                 final_w, final_h = width, height
 
+            cat_val = candidate.category.value if (candidate.category and hasattr(candidate.category, "value")) else str(candidate.category or "General")
             metadata = WallpaperMetadata(
                 image_id=candidate.id,
-                category=candidate.category.value,
+                category=cat_val,
                 provider=candidate.provider_name,
                 source_url=candidate.source_url,
                 download_url=candidate.download_url,

@@ -35,12 +35,12 @@ class NasaImageProvider(BaseImageProvider):
     def name(self) -> str:
         return "NASA Image and Video Library"
 
-    def supports_category(self, category: WallpaperCategory) -> bool:
-        return category == WallpaperCategory.SPACE
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
+        return category is None or category == WallpaperCategory.SPACE
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 10,
         exclude_ids: Optional[Set[str]] = None,
@@ -124,7 +124,7 @@ class NasaImageProvider(BaseImageProvider):
 
                     candidate = WallpaperCandidate(
                         id=f"nasa_{nasa_id}",
-                        category=category,
+                        category=category or WallpaperCategory.SPACE,
                         provider_name=self.name,
                         title=title,
                         download_url=best_image_url,

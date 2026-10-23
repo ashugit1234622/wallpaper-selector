@@ -31,8 +31,8 @@ class WallhavenProvider(BaseImageProvider):
     def name(self) -> str:
         return "Wallhaven"
 
-    def supports_category(self, category: WallpaperCategory) -> bool:
-        return category in (
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
+        return category is None or category in (
             WallpaperCategory.SPACE,
             WallpaperCategory.NATURE,
             WallpaperCategory.ART,
@@ -45,7 +45,7 @@ class WallhavenProvider(BaseImageProvider):
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 15,
         exclude_ids: Optional[Set[str]] = None,
@@ -74,6 +74,9 @@ class WallhavenProvider(BaseImageProvider):
         elif category == WallpaperCategory.PORTRAIT:
             search_query = query or random.choice(self.PORTRAIT_QUERIES)
             cat_flag = "001"
+        elif category is None:
+            search_query = query or "wallpaper"
+            cat_flag = "111"
         else:
             return []
 

@@ -16,14 +16,14 @@ class BaseImageProvider(ABC):
         pass
 
     @abstractmethod
-    def supports_category(self, category: WallpaperCategory) -> bool:
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
         """Whether this provider can supply images for the given category."""
         pass
 
     @abstractmethod
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 15,
         exclude_ids: Optional[Set[str]] = None,

@@ -23,12 +23,12 @@ class BingImageProvider(BaseImageProvider):
     def name(self) -> str:
         return "Bing Wallpaper Archive"
 
-    def supports_category(self, category: WallpaperCategory) -> bool:
-        return category in (WallpaperCategory.NATURE, WallpaperCategory.SPACE)
+    def supports_category(self, category: Optional[WallpaperCategory]) -> bool:
+        return category is None or category in (WallpaperCategory.NATURE, WallpaperCategory.SPACE)
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         query: Optional[str] = None,
         limit: int = 8,
         exclude_ids: Optional[Set[str]] = None,
@@ -90,7 +90,7 @@ class BingImageProvider(BaseImageProvider):
 
                         candidate = WallpaperCandidate(
                             id=candidate_id,
-                            category=category,
+                            category=category or WallpaperCategory.NATURE,
                             provider_name=self.name,
                             title=title,
                             download_url=download_url,

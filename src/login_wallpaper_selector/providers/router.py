@@ -121,7 +121,7 @@ class ProviderRouter:
 
     def get_providers_for_category(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         color: Optional[ColorPalette] = None,
         mood: Optional[WallpaperMood] = None,
         keyword: Optional[str] = None,
@@ -135,6 +135,8 @@ class ProviderRouter:
             providers = [self.the_met, self.wallhaven, self.wikimedia, self.artic]
         elif category == WallpaperCategory.PORTRAIT:
             providers = [self.the_met, self.wallhaven, self.wikimedia]
+        elif category is None:
+            providers = [self.wallhaven, self.wikimedia, self.the_met, self.artic, self.nasa, self.bing]
         else:
             providers = []
 
@@ -151,7 +153,7 @@ class ProviderRouter:
 
     def fetch_candidates(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         limit: int = 10,
         color: Optional[ColorPalette] = None,
         custom_color_hex: Optional[str] = None,
@@ -293,7 +295,7 @@ class ProviderRouter:
 
     def acquire_wallpaper_for_category(
         self,
-        category: WallpaperCategory,
+        category: Optional[WallpaperCategory] = None,
         mode: str = WallpaperPosition.FILL.value,
         progress_callback: Optional[callable] = None,
         status_callback: Optional[callable] = None,
@@ -304,9 +306,9 @@ class ProviderRouter:
         season: Optional[Season] = None,
         keyword: Optional[str] = None,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
-        """Fetch, download, validate, cache, and record a wallpaper for an online category with retries.
+        """Fetch, download, validate, cache, and record a wallpaper with retries.
         
-        Supports both standard category discovery and Strict Keyword Mode.
+        Supports specific category search, global keyword search, and category-free aesthetic discovery.
         Enforces a global network request budget and timeout.
 
         Returns:
@@ -342,8 +344,9 @@ class ProviderRouter:
                     color=color,
                 )
                 if status_callback:
+                    cat_desc = f" in {category.value}" if category else ""
                     if attempt == 1:
-                        desc = f"Searching for '{clean_kw}' in {category.value}..."
+                        desc = f"Searching for '{clean_kw}'{cat_desc}..."
                     elif attempt == 2:
                         desc = f"Trying alternative sources for '{tier_query}'..."
                     elif attempt == 3:
@@ -354,19 +357,41 @@ class ProviderRouter:
                         desc = f"Final matching attempt for '{clean_kw}'..."
                     status_callback(f"Attempt {attempt}/{total_attempts}: {desc}", attempt, total_attempts)
             else:
-                tier_query = get_retry_tier_query(category, attempt, mood=mood, color=color)
-                if mood and mood != WallpaperMood.ANY and attempt <= 3:
-                    tier_query = augment_query_with_mood(tier_query, mood, category)
-                if active_season and attempt <= 3:
-                    tier_query = augment_query_with_season(tier_query, active_season, category)
+                if category is not None:
+                    tier_query = get_retry_tier_query(category, attempt, mood=mood, color=color)
+                    if mood and mood != WallpaperMood.ANY and attempt <= 3:
+                        tier_query = augment_query_with_mood(tier_query, mood, category)
+                    if active_season and attempt <= 3:
+                        tier_query = augment_query_with_season(tier_query, active_season, category)
+                    cat_name = category.value
+                else:
+                    cat_name = "Wallpaper"
+                    general_queries = [
+                        "scenic landscape vista",
+                        "spectacular nature mountains",
+                        "epic cosmos galaxy stars",
+                        "fine art masterpiece painting",
+                        "dramatic architectural landscape",
+                        "atmospheric aesthetic vista",
+                    ]
+                    tier_query = general_queries[(attempt - 1) % len(general_queries)]
+                    if mood and mood != WallpaperMood.ANY and attempt <= 3:
+                        tier_query = augment_query_with_mood(tier_query, mood, category=None)
+                    if active_season and attempt <= 3:
+                        tier_query = augment_query_with_season(tier_query, active_season, category=None)
+                    if color and color != ColorPalette.ANY and attempt <= 3:
+                        pal_kw = "black and white" if color == ColorPalette.MONOCHROME else get_palette_keyword(color)
+                        if pal_kw and pal_kw.lower() not in tier_query.lower():
+                            tier_query = f"{tier_query} {pal_kw}"
 
                 if status_callback:
                     mood_info = f" [{mood.value}]" if mood and mood != WallpaperMood.ANY else ""
                     color_info = f" ({color.value})" if color and color != ColorPalette.ANY else ""
                     season_info = f" ({get_season_display(active_season)[0]} {active_season.value})" if active_season else ""
                     retry_strategy = f" [Tier {min(5, attempt)}: '{tier_query}']" if attempt > 1 else ""
+                    prefix = f"Finding {cat_name}" if category is not None else "Finding random"
                     status_callback(
-                        f"Attempt {attempt}/{total_attempts}{retry_strategy}: Finding {category.value}{season_info}{mood_info}{color_info} wallpaper...",
+                        f"Attempt {attempt}/{total_attempts}{retry_strategy}: {prefix}{season_info}{mood_info}{color_info} wallpaper...",
                         attempt,
                         total_attempts,
                     )
@@ -479,9 +504,10 @@ class ProviderRouter:
                             metadata.mood = mood.value
                         if active_season:
                             metadata.season = active_season.value
+                        cat_rec = category.value if category else (candidate.category.value if (candidate.category and hasattr(candidate.category, "value")) else str(candidate.category or "General"))
                         self.history.record(
                             item_id=candidate.id,
-                            category=category.value,
+                            category=cat_rec,
                             sha256=metadata.sha256,
                             title=metadata.title,
                         )
@@ -527,9 +553,10 @@ class ProviderRouter:
                             metadata.mood = mood.value
                         if active_season:
                             metadata.season = active_season.value
+                        cat_rec = category.value if category else (best_cand.category.value if (best_cand.category and hasattr(best_cand.category, "value")) else str(best_cand.category or "General"))
                         self.history.record(
                             item_id=best_cand.id,
-                            category=category.value,
+                            category=cat_rec,
                             sha256=metadata.sha256,
                             title=metadata.title,
                         )

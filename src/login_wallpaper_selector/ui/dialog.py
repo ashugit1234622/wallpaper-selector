@@ -310,7 +310,9 @@ class WallpaperSelectorDialog:
         ]
 
         self.cat_buttons = {}
+        self._cat_colors = {}
         for idx, (cat, label_text, color) in enumerate(categories):
+            self._cat_colors[cat] = color
             row = idx // 3
             col = idx % 3
 
@@ -320,6 +322,8 @@ class WallpaperSelectorDialog:
                     text=label_text,
                     font=ctk.CTkFont(size=13, weight="bold"),
                     height=36,
+                    fg_color=color,
+                    hover_color=color,
                     command=lambda c=cat: self.on_select_category(c),
                 )
                 btn.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
@@ -743,6 +747,25 @@ class WallpaperSelectorDialog:
                 self.status_lbl.config(text=text)
         self.root.after(0, _update)
 
+    def _update_category_buttons(self, active_category: Optional[WallpaperCategory] = None) -> None:
+        """Highlight active category button and reset others to default unselected appearance."""
+        if not hasattr(self, "cat_buttons"):
+            return
+        for cat, btn in self.cat_buttons.items():
+            is_active = (cat == active_category)
+            base_col = getattr(self, "_cat_colors", {}).get(cat, "#1f2937")
+            if HAS_CUSTOMTKINTER:
+                btn.configure(
+                    border_width=2 if is_active else 0,
+                    border_color="#38bdf8" if is_active else base_col,
+                    fg_color="#2563eb" if is_active else base_col,
+                )
+            else:
+                btn.config(
+                    relief="sunken" if is_active else "raised",
+                    bg="#2563eb" if is_active else "#f0f0f0",
+                )
+
     def set_busy(self, busy: bool) -> None:
         self.is_busy = busy
         state = "disabled" if busy else "normal"
@@ -758,7 +781,7 @@ class WallpaperSelectorDialog:
             if hasattr(self, "suggestion_buttons"):
                 for sb in self.suggestion_buttons:
                     sb.configure(state=state) if HAS_CUSTOMTKINTER else sb.config(state=state)
-            if (self.current_keyword or self.current_category) and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+            if (self.current_keyword or self.current_category or self.selected_color != ColorPalette.ANY or self.selected_mood != WallpaperMood.ANY or getattr(self.config, "seasonal_theme_enabled", False) or self.staged_metadata or self.current_metadata) and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
                 retry_state = "disabled" if busy else "normal"
                 self.retry_btn.configure(state=retry_state) if HAS_CUSTOMTKINTER else self.retry_btn.config(state=retry_state)
             target_meta = self.staged_metadata or self.current_metadata
@@ -819,6 +842,16 @@ class WallpaperSelectorDialog:
         icon, name = get_season_display(get_current_season())
         status_text = f"Seasonal Theme ({icon} {name}): Enabled" if enabled else "Seasonal Theme: Disabled"
         self.set_status(status_text)
+
+        if enabled:
+            # Category is NOT considered when seasonal theme is toggled
+            self.current_category = None
+            self._update_category_buttons(None)
+            active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
+            if active_kw:
+                self.on_trigger_search(active_kw)
+            else:
+                self._fetch_random_wallpaper(color=self.selected_color, mood=self.selected_mood)
 
     def on_rotate_toggle(self) -> None:
         """Handle toggling of scheduled auto-rotation."""
@@ -893,6 +926,17 @@ class WallpaperSelectorDialog:
         desc = "No color filter" if palette == ColorPalette.ANY else f"{palette.value} color filter"
         self.set_status(f"Palette updated: {desc}.")
 
+        # Category is NOT considered when color is selected
+        self.current_category = None
+        self._update_category_buttons(None)
+
+        # Trigger wallpaper acquisition: if search term exists, search with new color; otherwise fetch random image
+        active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
+        if active_kw:
+            self.on_trigger_search(active_kw)
+        else:
+            self._fetch_random_wallpaper(color=palette, mood=self.selected_mood)
+
     def on_select_mood(self, mood: WallpaperMood) -> None:
         """Handle user selection of mood/aesthetic vibe."""
         self.selected_mood = mood
@@ -913,6 +957,17 @@ class WallpaperSelectorDialog:
                 )
         desc = "No mood filter" if mood == WallpaperMood.ANY else f"{mood.value} mood"
         self.set_status(f"Mood updated: {desc}.")
+
+        # Category is NOT considered when mood is selected
+        self.current_category = None
+        self._update_category_buttons(None)
+
+        # Trigger wallpaper acquisition: if search term exists, search with new mood; otherwise fetch random image
+        active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
+        if active_kw:
+            self.on_trigger_search(active_kw)
+        else:
+            self._fetch_random_wallpaper(color=self.selected_color, mood=mood)
 
     def on_save_wallpaper(self) -> None:
         """Save the active wallpaper permanently to category's Saved folder."""
@@ -954,7 +1009,13 @@ class WallpaperSelectorDialog:
         if self.is_busy:
             return
 
+        # Explicit category selected: clear search entry to focus on category
+        if hasattr(self, "search_entry"):
+            self.search_entry.delete(0, tk.END)
+        self.current_keyword = ""
+
         self.current_category = category
+        self._update_category_buttons(category)
         self._populate_suggestion_chips(category)
         if category == WallpaperCategory.LOCAL_STORAGE:
             self._handle_local_storage()
@@ -1366,29 +1427,95 @@ class WallpaperSelectorDialog:
             self.search_entry.insert(0, query)
         self.on_trigger_search(query)
 
+    def _fetch_random_wallpaper(
+        self,
+        color: Optional[ColorPalette] = None,
+        mood: Optional[WallpaperMood] = None,
+    ) -> None:
+        """Fetch a random wallpaper matching selected color, mood, and seasonal filters across all providers without category restriction."""
+        if self.is_busy:
+            return
+
+        self.set_busy(True)
+        color = color if color is not None else self.selected_color
+        mood = mood if mood is not None else self.selected_mood
+        active_season = get_current_season() if getattr(self.config, "seasonal_theme_enabled", False) else None
+
+        mood_str = f" [{mood.value}]" if mood and mood != WallpaperMood.ANY else ""
+        col_str = f" ({color.value})" if color and color != ColorPalette.ANY else ""
+        season_str = f" ({get_season_display(active_season)[0]} {active_season.value})" if active_season else ""
+
+        self.set_status(f"Finding random{season_str}{mood_str}{col_str} wallpaper...", progress=0.05)
+
+        def _worker():
+            def _progress(downloaded: int, total: int):
+                frac = min(0.9, 0.2 + (downloaded / total) * 0.7) if total > 0 else 0.5
+                kb = downloaded // 1024
+                self.set_status(f"Downloading wallpaper ({kb} KB)...", progress=frac)
+
+            def _status(msg: str, attempt: int, total_attempts: int):
+                self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
+
+            mode = self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill")
+            meta, err = self.router.acquire_wallpaper_for_category(
+                category=None,
+                mode=mode,
+                progress_callback=_progress,
+                status_callback=_status,
+                color=color,
+                mood=mood,
+                season=active_season,
+            )
+
+            if meta:
+                self.staged_metadata = meta
+                if self.config.preview_before_apply:
+                    self.set_status(f"✓ Previewing: {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
+                    self._update_preview_and_attribution(meta, staged=True)
+                else:
+                    self.set_status("Applying wallpaper to desktop...", progress=0.95)
+                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    if success:
+                        lock_msg = ""
+                        if self.lockscreen_var.get():
+                            lock_ok = self.adapter.set_lockscreen(Path(meta.local_path))
+                            if lock_ok:
+                                lock_msg = " & Lock Screen"
+                        self.current_metadata = meta
+                        self.set_status(f"✓ Applied wallpaper{lock_msg}: {meta.title}", progress=1.0)
+                        self._update_preview_and_attribution(meta, staged=False)
+                    else:
+                        self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
+            else:
+                self.set_status(f"Could not find wallpaper: {err}", progress=0.0)
+
+            self.set_busy(False)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def on_trigger_search(self, query: Optional[str] = None) -> None:
-        """Initiate custom keyword search with intelligent fallback and monotonic ID tracking."""
+        """Initiate custom keyword search across all providers without category restriction."""
         if query is None:
             query = self.search_entry.get().strip() if hasattr(self, "search_entry") else ""
 
         if not query:
-            # Preserve blank search behavior: run standard category workflow
+            # Preserve blank search behavior: run standard category workflow if explicitly selected, else random
             if self.current_category and self.current_category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
                 self._handle_online_category(self.current_category)
-            elif not self.current_category:
-                self.set_status("Please select a category or enter a search keyword.")
+            else:
+                self._fetch_random_wallpaper(color=self.selected_color, mood=self.selected_mood)
             return
 
         if self.is_busy:
             return
 
+        # Crucial: category is NOT considered when search terms are entered
+        self.current_category = None
+        self._update_category_buttons(None)
+
         self._current_search_id += 1
         search_id = self._current_search_id
         self.current_keyword = query
-
-        cat = self.current_category
-        if not cat or cat in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
-            cat = WallpaperCategory.SPACE
 
         self.set_busy(True)
         self.set_status(f"Searching for '{query}' wallpaper...", progress=0.05)
@@ -1406,9 +1533,9 @@ class WallpaperSelectorDialog:
                     return
                 self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
 
-            mode = self.mode_var.get()
+            mode = self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill")
             meta, err = self.router.acquire_wallpaper_for_category(
-                cat,
+                category=None,
                 mode=mode,
                 progress_callback=_progress,
                 status_callback=_status,
@@ -1421,9 +1548,8 @@ class WallpaperSelectorDialog:
                 # Obsolete search result; discarded
                 return
 
-            cat_str = cat.value if hasattr(cat, "value") else str(cat)
             if meta:
-                self.search_history_mgr.record_search(query, cat_str, success=True, metadata=meta)
+                self.search_history_mgr.record_search(query, "Search", success=True, metadata=meta)
                 self.staged_metadata = meta
                 if self.config.preview_before_apply:
                     self.set_status(f"✓ Found '{query}': {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
@@ -1443,12 +1569,13 @@ class WallpaperSelectorDialog:
                     else:
                         self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
             else:
-                self.search_history_mgr.record_search(query, cat_str, success=False)
+                self.search_history_mgr.record_search(query, "Search", success=False)
                 # Strict keyword search: never silently replace with an unrelated cached category image
                 self.set_status(f"Search failed: {err}", progress=0.0)
 
             self.set_busy(False)
-            self.root.after(0, lambda: self._populate_suggestion_chips(self.current_category))
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._populate_suggestion_chips(None))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1465,6 +1592,8 @@ class WallpaperSelectorDialog:
             self.on_trigger_search(self.current_keyword)
         elif self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
             self._handle_online_category(self.current_category)
+        else:
+            self._fetch_random_wallpaper(color=self.selected_color, mood=self.selected_mood)
 
     def _check_for_updates_startup(self) -> None:
         """Asynchronously check for updates in background on app startup."""

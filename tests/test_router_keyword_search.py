@@ -164,3 +164,85 @@ def test_blank_keyword_uses_standard_category_search(tmp_path: Path):
     assert err is None
     assert meta is not None
     assert meta.title == "Forest Landscape"
+
+
+def test_global_keyword_search_without_category(tmp_path: Path):
+    """When category is None, keyword search queries across general providers without category restriction."""
+    cfg = AppConfig.load()
+    cfg.custom_cache_dir = str(tmp_path)
+    hist = HistoryTracker(cfg)
+    cache = CacheManager(cfg)
+    router = ProviderRouter(cfg, hist, cache)
+
+    cand = WallpaperCandidate(
+        id="cyberpunk_1",
+        category=None,
+        provider_name="Wallhaven",
+        title="Futuristic Cyberpunk City",
+        download_url="http://example.com/cyberpunk.jpg",
+        source_url="http://example.com/item/cyberpunk",
+        creator="Artist",
+        license_name="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="Cyberpunk",
+        width=1920,
+        height=1080,
+    )
+
+    img_path = tmp_path / "cyberpunk.jpg"
+    create_dummy_image(img_path)
+
+    router.fetch_candidates = MagicMock(return_value=[cand])
+    router.download_candidate = MagicMock(return_value=img_path)
+
+    meta, err = router.acquire_wallpaper_for_category(
+        category=None,  # No category restriction
+        keyword="cyberpunk",
+    )
+
+    assert err is None
+    assert meta is not None
+    assert "Cyberpunk" in meta.title
+
+
+def test_category_free_random_aesthetic_search(tmp_path: Path):
+    """When category is None and no keyword is given, router discovers random wallpapers adhering to mood and color."""
+    cfg = AppConfig.load()
+    cfg.custom_cache_dir = str(tmp_path)
+    hist = HistoryTracker(cfg)
+    cache = CacheManager(cfg)
+    router = ProviderRouter(cfg, hist, cache)
+
+    cand = WallpaperCandidate(
+        id="dark_blue_1",
+        category=None,
+        provider_name="Wallhaven",
+        title="Dark Moody Horizon",
+        download_url="http://example.com/dark_blue.jpg",
+        source_url="http://example.com/item/dark_blue",
+        creator="Photographer",
+        license_name="CC0",
+        license_url=None,
+        attribution_required=False,
+        attribution_text="Dark Moody Horizon",
+        width=1920,
+        height=1080,
+    )
+
+    img_path = tmp_path / "dark_blue.jpg"
+    create_dummy_image(img_path)
+
+    router.fetch_candidates = MagicMock(return_value=[cand])
+    router.download_candidate = MagicMock(return_value=img_path)
+
+    meta, err = router.acquire_wallpaper_for_category(
+        category=None,
+        color=ColorPalette.BLUE,
+        mood=WallpaperMood.DARK,
+    )
+
+    assert err is None
+    assert meta is not None
+    assert meta.title == "Dark Moody Horizon"
+

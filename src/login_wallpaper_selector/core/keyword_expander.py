@@ -183,8 +183,8 @@ def find_curated_subject(normalized_keyword: str) -> Optional[str]:
 
 def generate_keyword_query_for_tier(
     keyword: str,
-    category: WallpaperCategory,
-    attempt: int,
+    category: Optional[WallpaperCategory] = None,
+    attempt: int = 1,
     provider_style: str = "general",
     mood: Optional[WallpaperMood] = None,
     color: Optional[ColorPalette] = None,
@@ -193,7 +193,7 @@ def generate_keyword_query_for_tier(
 
     Args:
         keyword: User's raw search keyword.
-        category: Selected wallpaper category.
+        category: Selected wallpaper category or None if searching globally.
         attempt: Logical search tier index (1 to 5).
         provider_style: Provider query style ("wallpaper", "museum", "scientific", "general").
         mood: Optional mood filter.
@@ -204,8 +204,8 @@ def generate_keyword_query_for_tier(
     """
     clean_kw = normalize_keyword(keyword)
     if not clean_kw:
-        cat_name = category.value.lower() if hasattr(category, "value") else str(category).lower()
-        return cat_name
+        cat_name = category.value.lower() if category and hasattr(category, "value") else str(category or "").lower()
+        return cat_name or "wallpaper"
 
     tier = max(1, min(5, attempt))
     curated_key = find_curated_subject(clean_kw)
@@ -221,18 +221,22 @@ def generate_keyword_query_for_tier(
                 base_query = f"{prefix} {base_query}"
     else:
         # Generic deterministic expansion preserving core user keyword in EVERY tier
-        cat_name = category.value.lower() if hasattr(category, "value") else str(category).lower()
+        cat_name = category.value.lower() if category and hasattr(category, "value") else ""
         if tier == 1:
             base_query = clean_kw
         elif tier == 2:
-            base_query = f"{clean_kw} {cat_name}"
+            base_query = f"{clean_kw} {cat_name}".strip() if cat_name else clean_kw
         elif tier == 3:
             if category == WallpaperCategory.PORTRAIT:
                 base_query = f"{clean_kw} portrait character"
             elif category == WallpaperCategory.ART:
                 base_query = f"{clean_kw} artwork painting"
-            else:
+            elif category == WallpaperCategory.SPACE:
+                base_query = f"{clean_kw} cosmos"
+            elif category == WallpaperCategory.NATURE:
                 base_query = f"{clean_kw} landscape"
+            else:
+                base_query = f"{clean_kw} wallpaper"
         elif tier == 4:
             if category == WallpaperCategory.SPACE:
                 base_query = f"{clean_kw} deep space vista"
@@ -240,10 +244,12 @@ def generate_keyword_query_for_tier(
                 base_query = f"{clean_kw} atmospheric portrait"
             elif category == WallpaperCategory.ART:
                 base_query = f"{clean_kw} concept art"
-            else:
+            elif category == WallpaperCategory.NATURE:
                 base_query = f"{clean_kw} scenic vista"
+            else:
+                base_query = f"{clean_kw} high resolution"
         else:
-            base_query = f"{clean_kw} {cat_name}"
+            base_query = f"{clean_kw} {cat_name}".strip() if cat_name else clean_kw
 
     # ── Provider-Aware Syntax Adaptation ──────────────────────────────────
     # Adapt query to match provider strengths while NEVER dropping the subject
