@@ -133,7 +133,7 @@ def deregister_autostart() -> int:
 
 
 def create_desktop_shortcut() -> int:
-    """Create a Windows desktop shortcut with custom icon."""
+    """Create or update Windows desktop shortcut and project root shortcut with custom icon."""
     if sys.platform != "win32":
         print("Desktop shortcut creation is currently supported on Windows.")
         return 1
@@ -142,32 +142,37 @@ def create_desktop_shortcut() -> int:
         import win32com.client
         shell = win32com.client.Dispatch("WScript.Shell")
         desktop = shell.SpecialFolders("Desktop")
-        shortcut_path = Path(desktop) / "Login Wallpaper Selector.lnk"
 
         project_root = Path(__file__).resolve().parents[2]
         pythonw = Path(sys.executable).parent / "pythonw.exe"
         target = str(pythonw) if pythonw.exists() else sys.executable
-
-        shortcut = shell.CreateShortcut(str(shortcut_path))
-        shortcut.TargetPath = target
-        shortcut.Arguments = "-m login_wallpaper_selector"
-        shortcut.WorkingDirectory = str(project_root)
-
         icon_path = project_root / "assets" / "icon.ico"
-        if icon_path.exists():
-            shortcut.IconLocation = str(icon_path)
+        description = "Login Wallpaper Selector - Smart Desktop & Lock Screen Wallpapers with Rotation, Mood & Color Filters"
 
-        shortcut.Description = "Login Wallpaper Selector - Switch and save desktop & lock screen wallpapers"
-        shortcut.Save()
+        target_paths = [
+            Path(desktop) / "Login Wallpaper Selector.lnk",
+            project_root / "Login Wallpaper Selector.lnk",
+        ]
 
-        print("✓ Created desktop shortcut:")
-        print(f"  Location: {shortcut_path}")
+        for shortcut_path in target_paths:
+            shortcut = shell.CreateShortcut(str(shortcut_path))
+            shortcut.TargetPath = target
+            shortcut.Arguments = "-m login_wallpaper_selector"
+            shortcut.WorkingDirectory = str(project_root)
+            if icon_path.exists():
+                shortcut.IconLocation = str(icon_path)
+            shortcut.Description = description
+            shortcut.Save()
+
+        print("✓ Updated shortcuts successfully:")
+        for sp in target_paths:
+            print(f"  Location: {sp}")
         print(f"  Target: {target} -m login_wallpaper_selector")
         if icon_path.exists():
             print(f"  Icon: {icon_path}")
         return 0
     except Exception as e:
-        print(f"✗ Failed to create desktop shortcut: {e}")
+        print(f"✗ Failed to create/update shortcut: {e}")
         return 1
 
 
