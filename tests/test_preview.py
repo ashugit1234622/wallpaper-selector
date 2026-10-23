@@ -146,3 +146,18 @@ def test_dialog_preview_staging_and_apply(tmp_path, monkeypatch):
     # Verify adapter called with correct target path
     dialog.adapter.set_wallpaper.assert_called_once_with(Path(test_file), mode=WallpaperPosition.FIT.value)
 
+
+def test_dialog_defaults_to_fill_mode_on_open(monkeypatch):
+    """Verify that whenever the dialog opens, the display mode defaults to Fill."""
+    from login_wallpaper_selector.core.config import AppConfig
+    from login_wallpaper_selector.core.models import WallpaperPosition
+    from login_wallpaper_selector.ui.dialog import WallpaperSelectorDialog
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+
+    # Even if previous config had Fit, opening app must set it to Fill
+    cfg = AppConfig(default_position=WallpaperPosition.FIT.value)
+    dialog = WallpaperSelectorDialog(config=cfg)
+    assert dialog.config.default_position == WallpaperPosition.FILL.value
+
+

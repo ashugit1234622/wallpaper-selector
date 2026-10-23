@@ -38,6 +38,7 @@ class WallpaperSelectorDialog:
 
     def __init__(self, config: Optional[AppConfig] = None):
         self.config = config or AppConfig.load()
+        self.config.default_position = WallpaperPosition.FILL.value
         self.history = HistoryTracker(self.config)
         self.cache = CacheManager(self.config)
         self.favorites_mgr = FavoritesManager(self.config)
@@ -422,8 +423,10 @@ class WallpaperSelectorDialog:
         )
         mode_lbl.pack(side="left", padx=12, pady=8)
 
+        default_mode = WallpaperPosition.FILL.value
+        self.config.default_position = default_mode
+
         if HAS_CUSTOMTKINTER:
-            default_mode = self.config.default_position or WallpaperPosition.FILL.value
             self.mode_var = ctk.StringVar(value=default_mode)
             self.mode_selector = ctk.CTkSegmentedButton(
                 settings_frame,
@@ -465,7 +468,6 @@ class WallpaperSelectorDialog:
             )
             self.seasonal_chk.pack(side="right", padx=6, pady=8)
         else:
-            default_mode = self.config.default_position or WallpaperPosition.FILL.value
             self.mode_var = tk.StringVar(value=default_mode)
             self.mode_var.set(default_mode)
             for m in [WallpaperPosition.FILL.value, WallpaperPosition.FIT.value]:
