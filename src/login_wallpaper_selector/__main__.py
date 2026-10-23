@@ -291,13 +291,16 @@ def run_rotate_now() -> int:
 
 def launch_gui(is_login: bool = False) -> None:
     """Launch the graphical selection dialog."""
+    print("=== Login Wallpaper Selector ===", flush=True)
     config = AppConfig.load()
 
     if is_login:
         # Wait for desktop session to be ready
+        print("[*] Waiting for desktop session stabilization...", flush=True)
         detector = SessionDetector(stabilization_delay_seconds=config.session_delay_seconds)
         detector.wait_until_ready(log_fn=print)
 
+    print("[*] Opening wallpaper selector GUI. Logs will appear below as you interact with the app...", flush=True)
     from .ui.dialog import WallpaperSelectorDialog
     dialog = WallpaperSelectorDialog(config)
     dialog.run()

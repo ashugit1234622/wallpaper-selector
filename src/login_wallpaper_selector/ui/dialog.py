@@ -568,6 +568,7 @@ class WallpaperSelectorDialog:
 
     def set_status(self, text: str, progress: Optional[float] = None) -> None:
         """Update status label and optional progress bar from any thread."""
+        print(f"[*] {text}", flush=True)
         def _update():
             if HAS_CUSTOMTKINTER:
                 self.status_lbl.configure(text=text)
