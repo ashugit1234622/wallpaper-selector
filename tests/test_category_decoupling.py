@@ -82,3 +82,38 @@ def test_select_mood_clears_category_and_fetches_random(monkeypatch):
     assert dialog.current_category is None
     assert dialog.selected_mood == WallpaperMood.DARK
     mock_fetch_random.assert_called_once_with(color=dialog.selected_color, mood=WallpaperMood.DARK)
+
+
+def test_category_toggle_off_on_second_click(monkeypatch):
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    dialog = WallpaperSelectorDialog(config=AppConfig())
+    dialog.cat_buttons = {c: MagicMock() for c in WallpaperCategory}
+    dialog.set_status = MagicMock()
+    dialog.set_busy = MagicMock()
+
+    # First click toggles ON
+    mock_online = MagicMock()
+    monkeypatch.setattr(dialog, "_handle_online_category", mock_online)
+    dialog.on_select_category(WallpaperCategory.SPACE)
+    assert dialog.current_category == WallpaperCategory.SPACE
+    mock_online.assert_called_once_with(WallpaperCategory.SPACE)
+
+    # Second click toggles OFF
+    dialog.on_select_category(WallpaperCategory.SPACE)
+    assert dialog.current_category is None
+
+
+def test_retry_when_category_off_fetches_random(monkeypatch):
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: None)
+    dialog = WallpaperSelectorDialog(config=AppConfig())
+    dialog.current_category = None
+    dialog.current_keyword = ""
+    dialog.search_entry = MagicMock()
+    dialog.search_entry.get.return_value = ""
+    mock_fetch_random = MagicMock()
+    dialog._fetch_random_wallpaper = mock_fetch_random
+
+    dialog.on_retry()
+
+    mock_fetch_random.assert_called_once_with(color=dialog.selected_color, mood=dialog.selected_mood)
+

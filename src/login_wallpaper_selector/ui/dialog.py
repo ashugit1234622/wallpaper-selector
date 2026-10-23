@@ -770,8 +770,11 @@ class WallpaperSelectorDialog:
         self.is_busy = busy
         state = "disabled" if busy else "normal"
         def _update():
-            for btn in self.cat_buttons.values():
-                btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
+            for cat, btn in self.cat_buttons.items():
+                if busy and self.current_category == cat:
+                    btn.configure(state="normal") if HAS_CUSTOMTKINTER else btn.config(state="normal")
+                else:
+                    btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
             if hasattr(self, "search_btn"):
                 self.search_btn.configure(state=state) if HAS_CUSTOMTKINTER else self.search_btn.config(state=state)
             if hasattr(self, "clear_search_btn"):
@@ -1006,6 +1009,16 @@ class WallpaperSelectorDialog:
                 subprocess.Popen(["explorer", str(folder)])
 
     def on_select_category(self, category: WallpaperCategory) -> None:
+        # Toggle button behavior: if clicking the active category, toggle it OFF and cancel any in-flight fetch
+        if self.current_category == category:
+            self._current_search_id += 1
+            self.current_category = None
+            self._update_category_buttons(None)
+            self._populate_suggestion_chips(None)
+            self.set_busy(False)
+            self.set_status(f"Category {category.value} toggled off.")
+            return
+
         if self.is_busy:
             return
 
@@ -1014,6 +1027,7 @@ class WallpaperSelectorDialog:
             self.search_entry.delete(0, tk.END)
         self.current_keyword = ""
 
+        # Toggle category ON
         self.current_category = category
         self._update_category_buttons(category)
         self._populate_suggestion_chips(category)
@@ -1028,20 +1042,29 @@ class WallpaperSelectorDialog:
         """Handle selecting and cycling among favorited wallpapers."""
         fav = self.favorites_mgr.get_random_favorite()
         if not fav:
+            self.current_category = None
+            self._update_category_buttons(None)
             self.set_status("⭐ No favorites saved yet! Click ❤️ Favorite on wallpapers you like.")
             return
 
         fav_path = Path(fav.saved_path or fav.local_path)
         if not fav_path.exists():
+            self.current_category = None
+            self._update_category_buttons(None)
             self.set_status(f"Favorite image not found on disk: {fav.title}")
             return
 
+        self._current_search_id += 1
+        fetch_id = self._current_search_id
         self.set_busy(True)
         self.set_status(f"Loading favorite: {fav.title}...")
 
         def _worker():
             mode = self.mode_var.get()
             meta = self.cache.store_local_image(fav_path, mode=mode)
+            if self._current_search_id != fetch_id:
+                return
+
             if not meta:
                 meta = WallpaperMetadata(
                     image_id=fav.image_id,
@@ -1089,6 +1112,12 @@ class WallpaperSelectorDialog:
                     self._update_preview_and_attribution(meta, staged=False)
                 else:
                     self.set_status("Failed to apply favorite wallpaper via adapter.")
+
+            # Crucial: Category toggle automatically turns OFF after loading
+            self.current_category = None
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._update_category_buttons(None))
+
             self.set_busy(False)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1137,15 +1166,22 @@ class WallpaperSelectorDialog:
 
         if not selected_path:
             # User canceled the file picker
-            self.root.destroy()
+            self.current_category = None
+            self._update_category_buttons(None)
+            self.set_status("Local file selection cancelled.")
             return
 
+        self._current_search_id += 1
+        fetch_id = self._current_search_id
         self.set_busy(True)
         self.set_status(f"Validating {selected_path.name}...")
 
         def _worker():
             mode = self.mode_var.get()
             meta = self.cache.store_local_image(selected_path, mode=mode)
+            if self._current_search_id != fetch_id:
+                return
+
             if meta:
                 if self.config.preview_before_apply:
                     self.staged_metadata = meta
@@ -1167,21 +1203,33 @@ class WallpaperSelectorDialog:
                         self.set_status("Failed to apply wallpaper through desktop adapter.")
             else:
                 self.set_status("Error: Selected file is corrupted or not a valid image.")
+
+            # Crucial: Category toggle automatically turns OFF after loading
+            self.current_category = None
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._update_category_buttons(None))
+
             self.set_busy(False)
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _handle_online_category(self, category: WallpaperCategory) -> None:
+        self._current_search_id += 1
+        fetch_id = self._current_search_id
         self.set_busy(True)
         self.set_status(f"Searching for {category.value} wallpaper...", progress=0.05)
 
         def _worker():
             def _progress(downloaded: int, total: int):
+                if self._current_search_id != fetch_id:
+                    return
                 frac = min(0.9, 0.2 + (downloaded / total) * 0.7) if total > 0 else 0.5
                 kb = downloaded // 1024
                 self.set_status(f"Downloading {category.value} ({kb} KB)...", progress=frac)
 
             def _status(msg: str, attempt: int, total_attempts: int):
+                if self._current_search_id != fetch_id:
+                    return
                 self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
 
             mode = self.mode_var.get()
@@ -1193,6 +1241,9 @@ class WallpaperSelectorDialog:
                 color=self.selected_color,
                 mood=self.selected_mood,
             )
+
+            if self._current_search_id != fetch_id:
+                return
 
             if meta:
                 self.staged_metadata = meta
@@ -1234,6 +1285,11 @@ class WallpaperSelectorDialog:
                         self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
                 else:
                     self.set_status(f"Error: {err}", progress=0.0)
+
+            # Crucial: Category toggle automatically turns OFF after use so no category remains selected
+            self.current_category = None
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._update_category_buttons(None))
 
             self.set_busy(False)
 
@@ -1436,6 +1492,13 @@ class WallpaperSelectorDialog:
         if self.is_busy:
             return
 
+        # Ensure all category toggles are OFF
+        self.current_category = None
+        self._update_category_buttons(None)
+
+        self._current_search_id += 1
+        fetch_id = self._current_search_id
+
         self.set_busy(True)
         color = color if color is not None else self.selected_color
         mood = mood if mood is not None else self.selected_mood
@@ -1449,11 +1512,15 @@ class WallpaperSelectorDialog:
 
         def _worker():
             def _progress(downloaded: int, total: int):
+                if self._current_search_id != fetch_id:
+                    return
                 frac = min(0.9, 0.2 + (downloaded / total) * 0.7) if total > 0 else 0.5
                 kb = downloaded // 1024
                 self.set_status(f"Downloading wallpaper ({kb} KB)...", progress=frac)
 
             def _status(msg: str, attempt: int, total_attempts: int):
+                if self._current_search_id != fetch_id:
+                    return
                 self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
 
             mode = self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill")
@@ -1466,6 +1533,9 @@ class WallpaperSelectorDialog:
                 mood=mood,
                 season=active_season,
             )
+
+            if self._current_search_id != fetch_id:
+                return
 
             if meta:
                 self.staged_metadata = meta
@@ -1488,6 +1558,11 @@ class WallpaperSelectorDialog:
                         self.set_status("Download succeeded, but desktop adapter could not set wallpaper.")
             else:
                 self.set_status(f"Could not find wallpaper: {err}", progress=0.0)
+
+            # Ensure all category toggles remain OFF
+            self.current_category = None
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, lambda: self._update_category_buttons(None))
 
             self.set_busy(False)
 
@@ -1588,8 +1663,9 @@ class WallpaperSelectorDialog:
         self.set_status("Search input cleared.")
 
     def on_retry(self) -> None:
-        if self.current_keyword:
-            self.on_trigger_search(self.current_keyword)
+        active_kw = self.search_entry.get().strip() if hasattr(self, "search_entry") else self.current_keyword
+        if active_kw:
+            self.on_trigger_search(active_kw)
         elif self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
             self._handle_online_category(self.current_category)
         else:

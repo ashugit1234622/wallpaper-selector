@@ -373,8 +373,15 @@ class ProviderRouter:
                         "fine art masterpiece painting",
                         "dramatic architectural landscape",
                         "atmospheric aesthetic vista",
+                        "majestic ocean waves coastal",
+                        "deep space nebula astronomy",
+                        "lush tranquil forest woodland",
+                        "minimalist modern abstract architecture",
+                        "serene sunset horizon reflection",
+                        "historic classical oil painting",
                     ]
-                    tier_query = general_queries[(attempt - 1) % len(general_queries)]
+                    rand_offset = random.randint(0, len(general_queries) - 1)
+                    tier_query = general_queries[(attempt - 1 + rand_offset) % len(general_queries)]
                     if mood and mood != WallpaperMood.ANY and attempt <= 3:
                         tier_query = augment_query_with_mood(tier_query, mood, category=None)
                     if active_season and attempt <= 3:
