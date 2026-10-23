@@ -26,9 +26,11 @@ from ..core.history import HistoryTracker
 from ..core.cache import CacheManager
 from ..core.display import generate_desktop_preview_image
 from ..core.search_history import SearchHistoryManager
+from ..core.updater import check_for_updates, UpdateCheckResult
 from ..providers.router import ProviderRouter
 from ..adapters.factory import get_wallpaper_adapter
 from .file_picker import pick_local_image
+from .update_dialog import UpdateModalDialog
 
 
 class WallpaperSelectorDialog:
@@ -54,6 +56,9 @@ class WallpaperSelectorDialog:
         self.is_busy = False
 
         self._init_window()
+
+        if getattr(self.config, "check_for_updates_on_startup", True) and hasattr(self, "root") and self.root:
+            self.root.after(1500, self._check_for_updates_startup)
 
     def _init_window(self) -> None:
         if HAS_CUSTOMTKINTER:
@@ -172,18 +177,37 @@ class WallpaperSelectorDialog:
 
         # Header container
         header_frame = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
-        header_frame.pack(fill="x", padx=24, pady=(16, 8))
+        header_frame.pack(fill="x", padx=24, pady=(12, 4))
+
+        top_title_row = ctk.CTkFrame(header_frame, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(header_frame)
+        top_title_row.pack(fill="x")
 
         title_lbl = (
             ctk.CTkLabel(
-                header_frame,
+                top_title_row,
                 text="Desktop Wallpaper Selector",
                 font=ctk.CTkFont(size=22, weight="bold"),
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(header_frame, text="Desktop Wallpaper Selector", font=("Helvetica", 16, "bold"))
+            else tk.Label(top_title_row, text="Desktop Wallpaper Selector", font=("Helvetica", 16, "bold"))
         )
-        title_lbl.pack(anchor="w")
+        title_lbl.pack(side="left")
+
+        self.update_check_btn = (
+            ctk.CTkButton(
+                top_title_row,
+                text="🔄 Updates",
+                width=90,
+                height=26,
+                font=ctk.CTkFont(size=11),
+                fg_color="#1f2937",
+                hover_color="#374151",
+                command=self.on_manual_check_update,
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Button(top_title_row, text="🔄 Updates", font=("Helvetica", 8), command=self.on_manual_check_update)
+        )
+        self.update_check_btn.pack(side="right")
 
         subtitle_lbl = (
             ctk.CTkLabel(
@@ -1356,6 +1380,38 @@ class WallpaperSelectorDialog:
             self.on_trigger_search(self.current_keyword)
         elif self.current_category and self.current_category != WallpaperCategory.LOCAL_STORAGE:
             self._handle_online_category(self.current_category)
+
+    def _check_for_updates_startup(self) -> None:
+        """Asynchronously check for updates in background on app startup."""
+        def _worker():
+            try:
+                res = check_for_updates(self.config, force=False)
+                if res.update_available:
+                    self.root.after(0, lambda: self._show_update_modal(res))
+            except Exception:
+                pass
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_update_modal(self, update_info: UpdateCheckResult) -> None:
+        """Display the in-app update prompt modal."""
+        try:
+            UpdateModalDialog(self.root, update_info)
+        except Exception:
+            pass
+
+    def on_manual_check_update(self) -> None:
+        """Manually trigger update check from the GUI header."""
+        self.set_status("Checking GitHub for updates...")
+        def _worker():
+            res = check_for_updates(self.config, force=True)
+            if res.update_available:
+                self.root.after(0, lambda: self._show_update_modal(res))
+                self.set_status(f"🚀 New update available: v{res.latest_version}!")
+            elif res.error and "No releases found" not in res.error and "Throttled" not in res.error:
+                self.set_status(f"Update check: {res.error}")
+            else:
+                self.set_status(f"✓ You are running the latest version (v{res.current_version}).")
+        threading.Thread(target=_worker, daemon=True).start()
 
     def on_close(self) -> None:
         self.root.destroy()

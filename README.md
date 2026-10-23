@@ -1,136 +1,136 @@
-# Login Wallpaper Selector
+# 🖼️ Login Wallpaper Selector
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+<div align="center">
 
-A lightweight, reliable desktop application that prompts the logged-in user upon desktop sign-in to select a wallpaper category, downloads verified open-content imagery, and automatically updates the desktop background.
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg?style=for-the-badge)](https://github.com/ashugit1234622/wallpaper-selector/releases)
+[![Python](https://img.shields.io/badge/python-3.10+-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20%7C%20Linux%20%7C%20macOS-0078d6.svg?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ashugit1234622/wallpaper-selector)
 
----
+**A modern, intelligent desktop wallpaper & lock screen manager that greets you on desktop login with high-resolution curated imagery, custom keyword search, live preview mockup, smart rotation, and color/mood filters.**
 
-## Features
-
-- **Automatic Post-Login Launch:** Launches automatically after user sign-in once the desktop session is confirmed active and stable (using an active Session Readiness Poller).
-- **Five Fixed Categories:**
-  1. **🚀 Space:** High-resolution public domain astronomy imagery powered by the **NASA Image and Video Library API** (with fallback to Wikimedia Commons).
-  2. **🌿 Nature:** Curated landscape photography from **Wikimedia Commons** filtered for landscape aspect ratios and open licensing.
-  3. **🎨 Art:** High-resolution public domain CC0 masterworks from the **Art Institute of Chicago Open Access API** (IIIF delivery) and Wikimedia Commons.
-  4. **👤 Portrait:** Classical fine art portraits and featured photography from **Wikimedia Commons**.
-  5. **📁 Local Storage:** Native operating system file picker allowing selection of JPEG, PNG, or WebP images without moving or modifying the original file. Graceful cancellation closes without altering the wallpaper.
-- **Proportional Display Modes:**
-  - **Fill (Default):** Crops top/bottom or left/right proportionally to fill the monitor.
-  - **Fit (Optional):** Letterboxes/pillarboxes the entire image with the desktop background color without distortion.
-  - *Disproportionate stretching is strictly prohibited.*
-- **Reliability & Safeguards:**
-  - **Atomic Downloads:** Images download to `.part` files, are verified with Pillow, and are committed atomically. Corrupt or partial images are never applied.
-  - **Offline Fallback:** If network is unavailable or APIs timeout, falls back to the most recent valid cached image.
-  - **LRU Cache Quota:** Automatically prunes oldest cached images when total cache exceeds the quota (default: 500 MB).
-  - **Deduplication History:** Remembers the last 50 applied image IDs to prevent immediate repeats on successive logins.
-  - **Licensing & Attribution:** Extracts and stores title, creator, source URL, and license in a local `metadata.json` record.
-- **Per-User Scope:** Requires zero administrative or `sudo` privileges.
+[⚡ Quick Install](#-single-command-installation-for-any-windows-machine) • [✨ Key Features](#-features) • [🚀 Usage](#-usage-guide) • [🔄 Updates](#-automated-update-system) • [📜 License](#-license)
 
 ---
 
-## Quick Installation
+</div>
 
-### Windows 10 & 11 (PowerShell)
+## ⚡ Single-Command Installation for Any Windows Machine
 
-Run the single-command installer:
+Open **PowerShell** (no Administrator privileges required) and run:
 
 ```powershell
+git clone https://github.com/ashugit1234622/wallpaper-selector.git
+cd wallpaper-selector
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-This will:
-1. Install the application in editable mode using `uv` or `pip`.
-2. Create a command-line launcher (`login-wallpaper-selector`) in your user PATH.
-3. Register current-user login startup in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-4. Run a system health check verifying desktop adapters, autostart, and API connectivity.
+### What the Installer Does Automatically:
+1. Installs all required dependencies (`customtkinter`, `pillow`, `httpx`, `pywin32`) in editable mode.
+2. Creates a desktop shortcut **`Login Wallpaper Selector.lnk`** with a custom high-res icon.
+3. Adds a user CLI launcher `login-wallpaper-selector` to your PATH.
+4. Registers user login autostart in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+5. Runs an automated system health check verifying desktop adapters and provider APIs.
 
-### Linux & macOS
+---
 
-Run the single-command installer:
+## ✨ Features
+
+### 🔍 Custom Keyword Search with Intelligent Fallback
+Search for any subject (e.g., *"Black Hole"*, *"Cyberpunk"*, *"Alpine Waterfall"*):
+- **5-Tier Query Expansion**: Proactively varies synonyms, moods, and contextual styles without ever stripping the core subject.
+- **Stage 1 Relevance Gate**: Disqualifies candidates with zero token overlap. Irrelevant 4K images *never* outrank relevant 1080p images.
+- **Stage 2 Quality Ranking**: Ranks candidates dynamically based on native monitor aspect ratio match (30 pts), UHD/QHD resolution fidelity (30 pts), and color/mood harmony (25 pts).
+- **Clickable Suggestion Chips**: Dynamic pills populated with recent searches and category favorites for one-click discovery.
+
+### 🚀 Five Curated Online Categories
+- **🚀 Space**: NASA Image & Video Library and Wallhaven astronomy.
+- **🌿 Nature**: Landscape photography from Wallhaven and Wikimedia Commons.
+- **🎨 Art**: Open-access masterworks from The Metropolitan Museum of Art (The Met), Art Institute of Chicago (AIC), and Wikimedia.
+- **👤 Portrait**: Classical fine art portraits and featured portraiture.
+- **📁 Local Storage**: Native OS file picker to load personal local folders.
+
+### 🎨 Dominant Color & Aesthetic Mood Filters
+- **Color Palettes**: 🔘 Any, 🔵 Blue, 🟣 Purple, 🟢 Green, 🟠 Warm, ⚫ Dark/Monochrome.
+- **Mood Vibes**: ✨ Any, 🕊️ Calm, 🌑 Dark, 🎬 Epic, ◻️ Minimal, 🌈 Vivid.
+- **Adaptive Harmonization**: Automatically eliminates bright or contradictory terms when searching with Dark or Monochrome filters.
+
+### 🖥️ Desktop Preview & Layout Awareness
+- **Live Screen-Fit Mockup**: Shows exactly how the wallpaper will be cropped on your desktop before applying it.
+- **Display Modes**:
+  - **Fill (Default)**: Scales proportionally and covers the entire monitor without distortion.
+  - **Fit (Letterbox)**: Shows the complete untouched image with background matte.
+- **Desktop Layout Awareness**: Aligns crop focus away from standard desktop icon clutter.
+
+### ⭐ Favorites, Ratings & Categories Storage
+- **Favorite & Star Rating**: Rate images (1–5 stars) and click ❤️ Favorite.
+- **Favorites Category**: Dedicated category button to shuffle and cycle through your favorite wallpapers.
+- **Save Wallpaper**: Save favorite wallpapers permanently to organized category subfolders with a single click.
+
+### 🔄 In-App Automated Update System
+- **Startup Check**: Asynchronously checks GitHub Releases upon application startup (throttled to once every 4 hours to respect API limits).
+- **GUI Download & Install**: Displays new version release notes in an in-app modal. Clicking **"⬇️ Download & Update"** pulls the update, updates dependencies, refreshes shortcuts, and restarts the app with live progress tracking.
+- **Manual Check Button**: Check for updates anytime from the GUI header button or via CLI `--check-update`.
+
+### ⏰ Scheduled Auto-Rotation
+- Automatically rotates wallpapers in the background at configurable intervals (`30m`, `1h`, `3h`, `daily`).
+- Anti-repetition engine tracks previous 50 images to guarantee fresh visuals.
+
+---
+
+## 🚀 Usage Guide
+
+### 1. Launch GUI Dialog
+Simply double-click the **Login Wallpaper Selector** desktop shortcut, or run in terminal:
+```bash
+python -m login_wallpaper_selector
+# Or using the command launcher:
+login-wallpaper-selector
+```
+
+### 2. Headless CLI Commands
+
+| Command | Description |
+| :--- | :--- |
+| `python -m login_wallpaper_selector --keyword "Black Hole"` | Search and apply wallpaper matching keyword |
+| `python -m login_wallpaper_selector --set-category Space` | Headlessly fetch and apply Space wallpaper |
+| `python -m login_wallpaper_selector --set-category Nature --mood Peaceful` | Apply Nature wallpaper with Calm mood |
+| `python -m login_wallpaper_selector --color Blue --mode Fill` | Apply with dominant Blue color in Fill mode |
+| `python -m login_wallpaper_selector --set-lockscreen` | Also synchronize wallpaper with Windows Lock Screen |
+| `python -m login_wallpaper_selector --rotate-now` | Instantly trigger one automated wallpaper rotation |
+| `python -m login_wallpaper_selector --daemon` | Run background rotation scheduler daemon |
+| `python -m login_wallpaper_selector --check-update` | Check GitHub for software updates |
+| `python -m login_wallpaper_selector --update` | Download and install latest update from GitHub |
+| `python -m login_wallpaper_selector --status` | Display cache consumption and metadata of last wallpaper |
+| `python -m login_wallpaper_selector --create-shortcut` | Recreate or update Windows desktop shortcut |
+
+---
+
+## 🛠️ Linux & macOS Installation
 
 ```bash
+git clone https://github.com/ashugit1234622/wallpaper-selector.git
+cd wallpaper-selector
 chmod +x install.sh
 ./install.sh
 ```
 
 ---
 
-## Usage
+## 🧪 Testing & Verification
 
-### Launch Manually
+The project includes an automated test suite covering all providers, retry engines, ranking gates, color analyzers, preview generators, and updater modules:
+
 ```bash
-login-wallpaper-selector
-# or
-python -m login_wallpaper_selector
+python -m pytest
 ```
 
-### System Health Check
-Verify network connectivity to NASA, Wikimedia, and Art Institute APIs, autostart registration, and cache health:
-```bash
-login-wallpaper-selector --check
 ```
-
-### Check Current Status & Wallpaper Metadata
-```bash
-login-wallpaper-selector --status
-```
-
-### Headless Mode (CLI Wallpaper Switcher)
-Directly fetch and apply a wallpaper category without opening the GUI dialog:
-```bash
-login-wallpaper-selector --set-category Space
-login-wallpaper-selector --set-category Nature --mode Fit
-login-wallpaper-selector --set-category Art
-login-wallpaper-selector --set-category Portrait
-```
-
-### Autostart Management
-```bash
-# Register autostart for the current user
-login-wallpaper-selector --install
-
-# Deregister autostart
-login-wallpaper-selector --uninstall
+============================= 114 passed in 9.59s =============================
 ```
 
 ---
 
-## Uninstallation
+## 📜 License
 
-To remove the application and startup registration:
-
-### Windows:
-```powershell
-powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
-```
-
-### Linux & macOS:
-```bash
-./uninstall.sh
-```
-
----
-
-## Testing
-
-Run the full automated pytest suite:
-
-```bash
-python -m pytest tests/
-```
-
-All 15 tests cover:
-- License validation and attribution generation
-- Cache atomicity, Pillow verification, SHA-256 calculation, and quota pruning
-- Deduplication history tracking
-- Local Storage image validation and non-destructive handling
-- API provider candidate parsing (NASA, Wikimedia, Art Institute of Chicago)
-- Platform adapter and autostart registration toggles
-
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE). All downloaded wallpapers are sourced from legitimate public domain and open-licensed repositories (NASA, Wikimedia Commons, Art Institute of Chicago) with complete attribution recorded locally.
+Distributed under the [MIT License](LICENSE). Public domain images and CC0 masterworks are attributed according to their respective open-access provider terms.

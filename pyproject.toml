@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "login-wallpaper-selector"
-version = "0.1.0"
+version = "1.0.0"
 description = "A reliable desktop application that lets logged-in users choose a wallpaper category and automatically updates the desktop background."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,11 @@ license = { text = "MIT" }
 authors = [
     { name = "Login Wallpaper Selector Team" }
 ]
+
+[project.urls]
+Homepage = "https://github.com/ashugit1234622/wallpaper-selector"
+Repository = "https://github.com/ashugit1234622/wallpaper-selector"
+Issues = "https://github.com/ashugit1234622/wallpaper-selector/issues"
 dependencies = [
     "httpx>=0.24.0",
     "pillow>=9.0.0",

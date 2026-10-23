@@ -9,6 +9,7 @@ build/
 .cache/
 *.part
 *.tmp
+*.lnk
 .env
 .venv
 

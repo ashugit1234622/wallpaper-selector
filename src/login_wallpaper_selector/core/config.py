@@ -31,6 +31,10 @@ class AppConfig:
     rotation_category: str = "Any"
     seasonal_theme_enabled: bool = False
     preview_before_apply: bool = True
+    check_for_updates_on_startup: bool = True
+    github_repo: str = "ashugit1234622/wallpaper-selector"
+    last_update_check_timestamp: Optional[str] = None
+    update_check_interval_hours: int = 4
 
     @classmethod
     def get_config_file_path(cls) -> Path:

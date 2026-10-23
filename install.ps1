@@ -53,8 +53,12 @@ if (-not $SkipAutostart) {
     Write-Host "[3/4] Skipping autostart registration as requested." -ForegroundColor Gray
 }
 
-# 4. Verify installation
-Write-Host "[4/4] Running system verification check..." -ForegroundColor Yellow
+# 4. Create Desktop Shortcut
+Write-Host "[4/5] Creating Desktop Shortcut with custom icon..." -ForegroundColor Yellow
+python -m login_wallpaper_selector --create-shortcut
+
+# 5. Verify installation
+Write-Host "[5/5] Running system verification check..." -ForegroundColor Yellow
 python -m login_wallpaper_selector --check
 
 Write-Host ""

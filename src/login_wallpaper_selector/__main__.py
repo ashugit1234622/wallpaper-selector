@@ -292,6 +292,52 @@ def run_rotate_now() -> int:
         return 1
 
 
+def run_check_update() -> int:
+    """Check GitHub repository for newer releases."""
+    from .core.updater import check_for_updates
+    config = AppConfig.load()
+    print("Checking GitHub repository for updates...")
+    res = check_for_updates(config, force=True)
+    print(f"Current Version: v{res.current_version}")
+    if res.update_available:
+        print(f"🚀 New Update Available: v{res.latest_version}")
+        print(f"Release Title : {res.release_title}")
+        print(f"Published At  : {res.published_at}")
+        print(f"Release Notes :\n{res.release_notes}")
+        print("\nRun 'python -m login_wallpaper_selector --update' to download and install.")
+        return 0
+    elif res.error and "No releases found" not in res.error:
+        print(f"Notice: {res.error}")
+        return 0
+    else:
+        print(f"✓ Application is up to date (v{res.current_version}).")
+        return 0
+
+
+def run_update() -> int:
+    """Download and install the latest update."""
+    from .core.updater import check_for_updates, apply_update
+    config = AppConfig.load()
+    print("Checking GitHub repository for updates...")
+    res = check_for_updates(config, force=True)
+    if not res.update_available:
+        print(f"✓ Application is already at latest version (v{res.current_version}).")
+        return 0
+
+    print(f"⬇️ Downloading and installing update v{res.latest_version}...")
+    def _prog(msg, frac):
+        pct = int(frac * 100)
+        print(f"  [{pct}%] {msg}")
+
+    success, err = apply_update(res, progress_callback=_prog)
+    if success:
+        print(f"✓ Successfully updated to v{res.latest_version}!")
+        return 0
+    else:
+        print(f"✗ Update failed: {err}")
+        return 1
+
+
 def launch_gui(is_login: bool = False) -> None:
     """Launch the graphical selection dialog."""
     print("=== Login Wallpaper Selector ===", flush=True)
@@ -331,6 +377,8 @@ def main() -> None:
     parser.add_argument("--rotate-now", action="store_true", help="Instantly trigger one automated wallpaper rotation")
     parser.add_argument("--daemon", action="store_true", help="Run background wallpaper rotation daemon")
     parser.add_argument("--interval", type=str, help="Set rotation interval (e.g. 30m, 1h, 3h, daily)")
+    parser.add_argument("--check-update", action="store_true", help="Check GitHub for available software updates")
+    parser.add_argument("--update", action="store_true", help="Download and install the latest available software update")
 
     args = parser.parse_args()
 
@@ -357,6 +405,10 @@ def main() -> None:
         sys.exit(run_rotate_now())
     elif args.daemon:
         sys.exit(run_rotation_daemon())
+    elif args.check_update:
+        sys.exit(run_check_update())
+    elif args.update:
+        sys.exit(run_update())
     elif args.set_category or args.keyword:
         cat_to_use = args.set_category or "Space"
         sys.exit(set_category_headless(cat_to_use, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware, keyword_str=args.keyword))
