@@ -7,6 +7,7 @@ from .artic import ArtInstituteChicagoProvider
 from .wallhaven import WallhavenProvider
 from .the_met import TheMetImageProvider
 from .bing import BingImageProvider
+from .uhd_4k import Uhd4kProvider
 from .router import ProviderRouter
 
 __all__ = [
@@ -18,5 +19,7 @@ __all__ = [
     "WallhavenProvider",
     "TheMetImageProvider",
     "BingImageProvider",
+    "Uhd4kProvider",
     "ProviderRouter",
 ]
+

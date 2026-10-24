@@ -16,6 +16,7 @@ from .artic import ArtInstituteChicagoProvider
 from .wallhaven import WallhavenProvider
 from .the_met import TheMetImageProvider
 from .bing import BingImageProvider
+from .uhd_4k import Uhd4kProvider
 from ..core.models import WallpaperCategory, WallpaperCandidate, WallpaperMetadata, ColorPalette, WallpaperMood, WallpaperPosition
 from ..core.seasonal import Season, get_current_season, augment_query_with_season, get_season_display
 from ..core.config import AppConfig
@@ -118,6 +119,7 @@ class ProviderRouter:
         self.wallhaven = WallhavenProvider(timeout_seconds=config.request_timeout_seconds)
         self.the_met = TheMetImageProvider(timeout_seconds=config.request_timeout_seconds)
         self.bing = BingImageProvider(timeout_seconds=config.request_timeout_seconds)
+        self.uhd_4k = Uhd4kProvider(timeout_seconds=config.request_timeout_seconds)
 
     USER_AGENT = "LoginWallpaperSelector/1.0 (contact@mywallpaperapp.org)"
 
@@ -153,8 +155,8 @@ class ProviderRouter:
             providers = [p for p in providers if p != self.bing] + [self.bing]
 
         if search_for_tv:
-            # 4K TV mode requires high-resolution 16:9 imagery. Wallhaven & Bing natively support 4K.
-            preferred = [p for p in [self.wallhaven, self.bing] if p in providers]
+            # 4K TV mode requires high-resolution 16:9 imagery. Prioritize dedicated 4K repo first, then Wallhaven & Bing.
+            preferred = [p for p in [self.uhd_4k, self.wallhaven, self.bing] if p in [self.uhd_4k, self.wallhaven, self.bing]]
             others = [p for p in providers if p not in preferred]
             providers = preferred + others
 
@@ -309,8 +311,13 @@ class ProviderRouter:
                 c for c in all_candidates
                 if (c.width is None or c.width >= 3840) and (c.height is None or c.height >= 2160)
             ]
-            # Prioritize candidates with verified 4K UHD dimensions
-            all_candidates.sort(key=lambda c: 0 if (c.width and c.width >= 3840 and c.height and c.height >= 2160) else 1)
+            # Prioritize candidates from dedicated 4K repository, followed by verified 4K UHD dimensions
+            all_candidates.sort(
+                key=lambda c: (
+                    0 if c.provider_name == self.uhd_4k.name else 1,
+                    0 if (c.width and c.width >= 3840 and c.height and c.height >= 2160) else 1,
+                )
+            )
 
         return all_candidates
 
