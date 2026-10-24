@@ -16,6 +16,22 @@ except ImportError:
 
 from ..core.updater import UpdateCheckResult, apply_update, restart_application
 
+_W11 = {
+    "font": "Segoe UI",
+    "surface_0": "#202020",
+    "surface_1": "#2b2b2b",
+    "surface_2": "#333333",
+    "surface_3": "#3c3c3c",
+    "accent": "#0078d4",
+    "accent_hov": "#1084d8",
+    "text_pri": "#f3f3f3",
+    "text_sec": "#9d9d9d",
+    "text_ter": "#6b6b6b",
+    "border": "#404040",
+    "danger": "#c42b1c",
+    "success": "#0f7b0f",
+}
+
 
 class UpdateModalDialog:
     """Modal window prompting user to download and install a new application release."""
@@ -48,33 +64,48 @@ class UpdateModalDialog:
             pass
 
     def _build_widgets(self) -> None:
-        container = ctk.CTkFrame(self.window) if HAS_CUSTOMTKINTER else tk.Frame(self.window)
-        container.pack(fill="both", expand=True, padx=20, pady=20)
+        container = (
+            ctk.CTkFrame(
+                self.window,
+                fg_color=_W11["surface_1"],
+                corner_radius=8,
+                border_width=1,
+                border_color=_W11["border"],
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self.window)
+        )
+        container.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Bottom Button Toolbar - Packed FIRST with side="bottom" so buttons are NEVER overlapped
         btn_frame = ctk.CTkFrame(container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(container)
-        btn_frame.pack(side="bottom", fill="x", pady=(10, 0))
+        btn_frame.pack(side="bottom", fill="x", padx=16, pady=(10, 16))
 
         if HAS_CUSTOMTKINTER:
             self.later_btn = ctk.CTkButton(
                 btn_frame,
                 text="Remind Me Later",
                 width=130,
-                height=34,
-                fg_color="#374151",
-                hover_color="#4b5563",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.window.destroy,
             )
             self.later_btn.pack(side="left")
 
             self.update_btn = ctk.CTkButton(
                 btn_frame,
-                text="⬇️ Download & Update",
+                text="⬇️  Download & Update",
                 width=170,
-                height=34,
-                font=ctk.CTkFont(size=13, weight="bold"),
-                fg_color="#2563eb",
-                hover_color="#1d4ed8",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
+                text_color=_W11["text_pri"],
                 command=self.on_start_update,
             )
             self.update_btn.pack(side="right")
@@ -86,54 +117,90 @@ class UpdateModalDialog:
             self.update_btn.pack(side="right")
 
         # Header Badge
-        header_text = f"🚀 New Major Update: v{self.update_info.latest_version}"
+        header_text = f"🚀 New Update: v{self.update_info.latest_version}"
         header_lbl = (
-            ctk.CTkLabel(container, text=header_text, font=ctk.CTkFont(size=18, weight="bold"), text_color="#38bdf8")
+            ctk.CTkLabel(
+                container,
+                text=header_text,
+                font=ctk.CTkFont(family=_W11["font"], size=18, weight="bold"),
+                text_color=_W11["text_pri"],
+            )
             if HAS_CUSTOMTKINTER
-            else tk.Label(container, text=header_text, font=("Helvetica", 14, "bold"), fg="#0284c7")
+            else tk.Label(container, text=header_text, font=("Segoe UI", 14, "bold"), fg="#0078d4")
         )
-        header_lbl.pack(anchor="w", pady=(0, 4))
+        header_lbl.pack(anchor="w", padx=16, pady=(16, 2))
 
         sub_text = f"Current version: v{self.update_info.current_version}  •  Release: {self.update_info.release_title or self.update_info.latest_version}"
         sub_lbl = (
-            ctk.CTkLabel(container, text=sub_text, font=ctk.CTkFont(size=12), text_color="gray")
+            ctk.CTkLabel(
+                container,
+                text=sub_text,
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
-            else tk.Label(container, text=sub_text, fg="gray", font=("Helvetica", 9))
+            else tk.Label(container, text=sub_text, fg="gray", font=("Segoe UI", 9))
         )
-        sub_lbl.pack(anchor="w", pady=(0, 10))
+        sub_lbl.pack(anchor="w", padx=16, pady=(0, 12))
 
         # Release Notes Label
         notes_hdr = (
-            ctk.CTkLabel(container, text="Release Notes & Highlights:", font=ctk.CTkFont(size=12, weight="bold"))
+            ctk.CTkLabel(
+                container,
+                text="Release Notes & Highlights:",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
-            else tk.Label(container, text="Release Notes & Highlights:", font=("Helvetica", 9, "bold"))
+            else tk.Label(container, text="Release Notes & Highlights:", font=("Segoe UI", 9, "bold"))
         )
-        notes_hdr.pack(anchor="w", pady=(0, 4))
+        notes_hdr.pack(anchor="w", padx=16, pady=(0, 4))
 
         # Scrollable Release Notes Box
         if HAS_CUSTOMTKINTER:
-            self.notes_box = ctk.CTkTextbox(container, height=130, font=ctk.CTkFont(size=11), wrap="word")
-            self.notes_box.pack(fill="both", expand=True, pady=(0, 8))
+            self.notes_box = ctk.CTkTextbox(
+                container,
+                height=130,
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_0"],
+                border_width=1,
+                border_color=_W11["border"],
+                wrap="word",
+            )
+            self.notes_box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
             clean_notes = self.update_info.release_notes or "A new version of Login Wallpaper Selector is available on GitHub."
             self.notes_box.insert("1.0", clean_notes)
             self.notes_box.configure(state="disabled")
         else:
-            self.notes_box = tk.Text(container, height=7, wrap="word", font=("Helvetica", 9))
-            self.notes_box.pack(fill="both", expand=True, pady=(0, 8))
+            self.notes_box = tk.Text(container, height=7, wrap="word", font=("Segoe UI", 9))
+            self.notes_box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
             self.notes_box.insert("1.0", self.update_info.release_notes or "New version available.")
             self.notes_box.config(state="disabled")
 
         # Progress Area
         self.status_lbl = (
-            ctk.CTkLabel(container, text="", font=ctk.CTkFont(size=11), wraplength=480, justify="left")
+            ctk.CTkLabel(
+                container,
+                text="",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_sec"],
+                wraplength=480,
+                justify="left",
+            )
             if HAS_CUSTOMTKINTER
             else tk.Label(container, text="", wraplength=480, justify="left")
         )
-        self.status_lbl.pack(fill="x", pady=(2, 4))
+        self.status_lbl.pack(fill="x", padx=16, pady=(2, 4))
 
         if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(container)
-            self.progress_bar.pack(fill="x", pady=(0, 6))
+            self.progress_bar = ctk.CTkProgressBar(
+                container,
+                height=4,
+                corner_radius=2,
+                progress_color=_W11["accent"],
+            )
+            self.progress_bar.pack(fill="x", padx=16, pady=(0, 6))
             self.progress_bar.set(0)
         else:
             self.progress_bar = None
@@ -164,8 +231,8 @@ class UpdateModalDialog:
         def _worker():
             success, err = apply_update(self.update_info, progress_callback=_progress)
             if success:
-                _progress("✓ Update complete! Restarting application in 2 seconds...", 1.0)
-                time.sleep(2.0)
+                _progress("✓ Update complete! Restarting application in 1.5 seconds...", 1.0)
+                time.sleep(1.5)
                 self.window.after(0, self._perform_restart)
             else:
                 # Clean error message: grab informative last line to keep dialog uncluttered

@@ -32,6 +32,24 @@ from .planner import create_organization_plan
 from .executor import execute_plan
 from .journal import TransactionJournal
 
+_W11 = {
+    "font": "Segoe UI",
+    "surface_0": "#202020",
+    "surface_1": "#2b2b2b",
+    "surface_2": "#333333",
+    "surface_3": "#3c3c3c",
+    "accent": "#0078d4",
+    "accent_hov": "#1084d8",
+    "accent_pre": "#006cbd",
+    "text_pri": "#f3f3f3",
+    "text_sec": "#9d9d9d",
+    "text_ter": "#6b6b6b",
+    "border": "#404040",
+    "danger": "#c42b1c",
+    "success": "#0f7b0f",
+    "warning": "#9d5d00",
+}
+
 
 class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
     """View container for Download Folder Organizer embedded inside Desktop Utility Suite."""
@@ -93,16 +111,17 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
     def _build_widgets(self) -> None:
         # 1. Top Header
         header_frame = ctk.CTkFrame(self, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self)
-        header_frame.pack(fill="x", padx=16, pady=(8, 4))
+        header_frame.pack(fill="x", padx=16, pady=(12, 6))
 
         title_lbl = (
             ctk.CTkLabel(
                 header_frame,
-                text="📁 Download Folder Organizer",
-                font=ctk.CTkFont(size=20, weight="bold"),
+                text="📁  Download Folder Organizer",
+                font=ctk.CTkFont(family=_W11["font"], size=20, weight="bold"),
+                text_color=_W11["text_pri"],
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(header_frame, text="Download Folder Organizer", font=("Helvetica", 14, "bold"))
+            else tk.Label(header_frame, text="Download Folder Organizer", font=("Segoe UI", 14, "bold"))
         )
         title_lbl.pack(anchor="w")
 
@@ -110,30 +129,52 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
             ctk.CTkLabel(
                 header_frame,
                 text="Safely analyze, categorize, and organize cluttered files with pre-execution preview and full undo.",
-                font=ctk.CTkFont(size=12),
-                text_color="#9ca3af",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                text_color=_W11["text_sec"],
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(header_frame, text="Safely categorize and organize cluttered files.", fg="#666666")
+            else tk.Label(header_frame, text="Safely categorize and organize cluttered files.", fg="gray", font=("Segoe UI", 9))
         )
-        subtitle_lbl.pack(anchor="w", pady=(1, 4))
+        subtitle_lbl.pack(anchor="w", pady=(1, 6))
 
         # 2. Folder Selection Section
-        folder_card = ctk.CTkFrame(self, fg_color="#1e293b", corner_radius=8) if HAS_CUSTOMTKINTER else tk.Frame(self, bg="#eeeeee")
+        folder_card = (
+            ctk.CTkFrame(
+                self,
+                fg_color=_W11["surface_1"],
+                corner_radius=8,
+                border_width=1,
+                border_color=_W11["border"],
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self, bg="#eeeeee")
+        )
         folder_card.pack(fill="x", padx=16, pady=4)
 
         f_row = ctk.CTkFrame(folder_card, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(folder_card)
         f_row.pack(fill="x", padx=12, pady=(10, 6))
 
         src_lbl = (
-            ctk.CTkLabel(f_row, text="Source Folder:", font=ctk.CTkFont(size=12, weight="bold"))
+            ctk.CTkLabel(
+                f_row,
+                text="Source Folder:",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
             else tk.Label(f_row, text="Source Folder:")
         )
         src_lbl.pack(side="left", padx=(0, 8))
 
         self.folder_path_entry = (
-            ctk.CTkEntry(f_row, height=32, font=ctk.CTkFont(size=12))
+            ctk.CTkEntry(
+                f_row,
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_0"],
+                border_color=_W11["border"],
+            )
             if HAS_CUSTOMTKINTER
             else tk.Entry(f_row)
         )
@@ -146,7 +187,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="📁 Browse",
                 width=85,
                 height=32,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_browse_folder,
             )
             if HAS_CUSTOMTKINTER
@@ -160,9 +205,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="🔍 Scan Folder",
                 width=110,
                 height=32,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#2563eb",
-                hover_color="#1d4ed8",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
+                text_color=_W11["text_pri"],
                 command=self.on_scan_folder,
             )
             if HAS_CUSTOMTKINTER
@@ -179,7 +226,7 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 opt_row,
                 text="Include Subfolders (Recursive)",
                 variable=self.recursive_var,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family=_W11["font"], size=11),
                 command=self.on_scan_folder,
             )
             if HAS_CUSTOMTKINTER
@@ -192,8 +239,8 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
             ctk.CTkLabel(
                 opt_row,
                 text=dest_desc,
-                font=ctk.CTkFont(size=11),
-                text_color="#94a3b8",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_ter"],
             )
             if HAS_CUSTOMTKINTER
             else tk.Label(opt_row, text=dest_desc)
@@ -206,9 +253,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="Change Dest...",
                 width=90,
                 height=26,
-                font=ctk.CTkFont(size=11),
-                fg_color="#334155",
-                hover_color="#475569",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_change_destination,
             )
             if HAS_CUSTOMTKINTER
@@ -216,28 +265,43 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         )
         self.dest_btn.pack(side="right")
 
-        # 3. Summary Dashboard Cards (4 metrics across)
+        # 3. Summary Dashboard Cards (5 metrics across)
         self.summary_frame = ctk.CTkFrame(self, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self)
         self.summary_frame.pack(fill="x", padx=16, pady=4)
 
         for col in range(5):
             self.summary_frame.columnconfigure(col, weight=1)
 
-        self.card_files = self._create_metric_card(self.summary_frame, 0, "Discovered Files", "0", "#38bdf8")
+        self.card_files = self._create_metric_card(self.summary_frame, 0, "Discovered Files", "0", "#60a5fa")
         self.card_supported = self._create_metric_card(self.summary_frame, 1, "Categorized Files", "0", "#4ade80")
         self.card_organizable = self._create_metric_card(self.summary_frame, 2, "Proposed Moves", "0", "#facc15")
         self.card_conflicts = self._create_metric_card(self.summary_frame, 3, "Conflicts / Review", "0", "#f87171")
         self.card_size = self._create_metric_card(self.summary_frame, 4, "Total Size", "0 B", "#c084fc")
 
         # 4. Strategy & Conflict Bar
-        strat_card = ctk.CTkFrame(self, fg_color="#1e293b", corner_radius=8) if HAS_CUSTOMTKINTER else tk.Frame(self)
+        strat_card = (
+            ctk.CTkFrame(
+                self,
+                fg_color=_W11["surface_1"],
+                corner_radius=8,
+                border_width=1,
+                border_color=_W11["border"],
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self)
+        )
         strat_card.pack(fill="x", padx=16, pady=4)
 
         s_row = ctk.CTkFrame(strat_card, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(strat_card)
         s_row.pack(fill="x", padx=12, pady=8)
 
         mode_lbl = (
-            ctk.CTkLabel(s_row, text="Organization Mode:", font=ctk.CTkFont(size=11, weight="bold"))
+            ctk.CTkLabel(
+                s_row,
+                text="Organization Mode:",
+                font=ctk.CTkFont(family=_W11["font"], size=11, weight="bold"),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
             else tk.Label(s_row, text="Mode:")
         )
@@ -250,7 +314,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 command=self.on_mode_change,
                 width=180,
                 height=28,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                button_color=_W11["surface_3"],
+                button_hover_color=_W11["border"],
             )
             if HAS_CUSTOMTKINTER
             else tk.OptionMenu(s_row, tk.StringVar(), *OrganizationMode.display_names())
@@ -260,7 +328,12 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
             self.mode_menu.set(self.current_mode.to_display())
 
         conflict_lbl = (
-            ctk.CTkLabel(s_row, text="Conflict Handling:", font=ctk.CTkFont(size=11, weight="bold"))
+            ctk.CTkLabel(
+                s_row,
+                text="Conflict Handling:",
+                font=ctk.CTkFont(family=_W11["font"], size=11, weight="bold"),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
             else tk.Label(s_row, text="Conflict Handling:")
         )
@@ -273,7 +346,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 command=self.on_conflict_change,
                 width=190,
                 height=28,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                button_color=_W11["surface_3"],
+                button_hover_color=_W11["border"],
             )
             if HAS_CUSTOMTKINTER
             else tk.OptionMenu(s_row, tk.StringVar(), *ConflictPolicy.display_names())
@@ -292,9 +369,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="✓ Select All",
                 width=85,
                 height=26,
-                font=ctk.CTkFont(size=11),
-                fg_color="#334155",
-                hover_color="#475569",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_select_all,
             )
             if HAS_CUSTOMTKINTER
@@ -308,9 +387,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="✗ Deselect All",
                 width=95,
                 height=26,
-                font=ctk.CTkFont(size=11),
-                fg_color="#334155",
-                hover_color="#475569",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_deselect_all,
             )
             if HAS_CUSTOMTKINTER
@@ -323,7 +404,7 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 preview_toolbar,
                 text="Show Conflicts Only",
                 variable=self.conflicts_only_var,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family=_W11["font"], size=11),
                 command=self._refresh_table_display,
             )
             if HAS_CUSTOMTKINTER
@@ -338,7 +419,10 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 placeholder_text="Filter files...",
                 width=160,
                 height=26,
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_0"],
+                border_color=_W11["border"],
             )
             if HAS_CUSTOMTKINTER
             else tk.Entry(preview_toolbar)
@@ -347,7 +431,17 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         self.search_entry.bind("<KeyRelease>", lambda e: self._refresh_table_display())
 
         # 6. Bottom Action Bar & Progress (Docked at bottom first so it is ALWAYS accessible)
-        bottom_frame = ctk.CTkFrame(self, fg_color="#1e293b", corner_radius=8) if HAS_CUSTOMTKINTER else tk.Frame(self)
+        bottom_frame = (
+            ctk.CTkFrame(
+                self,
+                fg_color=_W11["surface_1"],
+                corner_radius=8,
+                border_width=1,
+                border_color=_W11["border"],
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self)
+        )
         bottom_frame.pack(side="bottom", fill="x", padx=16, pady=(4, 12))
 
         b_top_row = ctk.CTkFrame(bottom_frame, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(bottom_frame)
@@ -357,7 +451,8 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
             ctk.CTkLabel(
                 b_top_row,
                 text="Scan a folder to preview and organize files.",
-                font=ctk.CTkFont(size=12, weight="bold"),
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                text_color=_W11["text_sec"],
             )
             if HAS_CUSTOMTKINTER
             else tk.Label(b_top_row, text="Ready.")
@@ -370,9 +465,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 text="↩️ Undo Last Batch",
                 width=140,
                 height=30,
-                font=ctk.CTkFont(size=11, weight="bold"),
-                fg_color="#4b5563",
-                hover_color="#374151",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_undo_last_batch,
             )
             if HAS_CUSTOMTKINTER
@@ -384,7 +481,12 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         b_act_row.pack(fill="x", padx=12, pady=(4, 8))
 
         if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(b_act_row, height=12)
+            self.progress_bar = ctk.CTkProgressBar(
+                b_act_row,
+                height=6,
+                corner_radius=3,
+                progress_color=_W11["accent"],
+            )
             self.progress_bar.set(0)
             self.progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
         else:
@@ -396,10 +498,11 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 b_act_row,
                 text="⏹ Cancel",
                 width=85,
-                height=34,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#dc2626",
-                hover_color="#b91c1c",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["danger"],
+                hover_color="#a82315",
                 state="disabled",
                 command=self.on_cancel_execution,
             )
@@ -413,10 +516,12 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
                 b_act_row,
                 text="🚀 Organize Selected Files",
                 width=190,
-                height=34,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#059669",
-                hover_color="#047857",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
+                text_color=_W11["text_pri"],
                 state="disabled",
                 command=self.on_execute_plan,
             )
@@ -426,10 +531,51 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
         self.execute_btn.pack(side="right")
 
         # 5b. Table container - Fills remaining space between controls and bottom bar
-        table_container = ctk.CTkFrame(self, fg_color="#0f172a", corner_radius=6) if HAS_CUSTOMTKINTER else tk.Frame(self)
+        table_container = (
+            ctk.CTkFrame(
+                self,
+                fg_color=_W11["surface_0"],
+                corner_radius=6,
+                border_width=1,
+                border_color=_W11["border"],
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self)
+        )
         table_container.pack(fill="both", expand=True, padx=16, pady=4)
 
         # Use Treeview with custom dark styling for responsive display
+        try:
+            style = ttk.Style()
+            style.theme_use("clam")
+            style.configure(
+                "Treeview",
+                background=_W11["surface_0"],
+                foreground=_W11["text_pri"],
+                fieldbackground=_W11["surface_0"],
+                borderwidth=0,
+                font=(_W11["font"], 10),
+                rowheight=26,
+            )
+            style.configure(
+                "Treeview.Heading",
+                background=_W11["surface_1"],
+                foreground=_W11["text_sec"],
+                relief="flat",
+                font=(_W11["font"], 10, "bold"),
+            )
+            style.map(
+                "Treeview",
+                background=[("selected", _W11["accent"])],
+                foreground=[("selected", "#ffffff")],
+            )
+            style.map(
+                "Treeview.Heading",
+                background=[("active", _W11["surface_2"])],
+            )
+        except Exception:
+            pass
+
         columns = ("selected", "filename", "category", "proposed_dest", "size", "status")
         self.tree = ttk.Treeview(
             table_container,
@@ -461,23 +607,39 @@ class DownloadOrganizerView(ctk.CTkFrame if HAS_CUSTOMTKINTER else tk.Frame):
 
     def _create_metric_card(self, parent, col: int, title: str, value: str, accent_color: str):
         card = (
-            ctk.CTkFrame(parent, fg_color="#1e293b", corner_radius=6)
+            ctk.CTkFrame(
+                parent,
+                fg_color=_W11["surface_1"],
+                corner_radius=6,
+                border_width=1,
+                border_color=_W11["border"],
+            )
             if HAS_CUSTOMTKINTER
             else tk.Frame(parent, relief="groove", borderwidth=1)
         )
         card.grid(row=0, column=col, padx=3, pady=2, sticky="nsew")
 
         v_lbl = (
-            ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=16, weight="bold"), text_color=accent_color)
+            ctk.CTkLabel(
+                card,
+                text=value,
+                font=ctk.CTkFont(family=_W11["font"], size=16, weight="bold"),
+                text_color=accent_color,
+            )
             if HAS_CUSTOMTKINTER
-            else tk.Label(card, text=value, font=("Helvetica", 12, "bold"))
+            else tk.Label(card, text=value, font=("Segoe UI", 12, "bold"))
         )
         v_lbl.pack(pady=(6, 0))
 
         t_lbl = (
-            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10), text_color="#94a3b8")
+            ctk.CTkLabel(
+                card,
+                text=title,
+                font=ctk.CTkFont(family=_W11["font"], size=10),
+                text_color=_W11["text_sec"],
+            )
             if HAS_CUSTOMTKINTER
-            else tk.Label(card, text=title, font=("Helvetica", 9))
+            else tk.Label(card, text=title, font=("Segoe UI", 9))
         )
         t_lbl.pack(pady=(0, 6))
 

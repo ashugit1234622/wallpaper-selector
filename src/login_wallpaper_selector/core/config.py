@@ -35,6 +35,10 @@ class AppConfig:
     github_repo: str = "ashugit1234622/wallpaper-selector"
     last_update_check_timestamp: Optional[str] = None
     update_check_interval_hours: int = 4
+    global_hotkey_enabled: bool = True
+    global_hotkey_combo: str = "Win+Alt+W"
+    pause_on_battery: bool = True
+    target_monitor_id: Optional[str] = None  # None means all monitors
 
     organizer_last_folder: Optional[str] = None
     organizer_mode: str = "by_type"  # "by_type", "by_date", "by_type_and_date"

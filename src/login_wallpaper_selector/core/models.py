@@ -139,6 +139,9 @@ class WallpaperMetadata:
     season: Optional[str] = None
     is_favorite: bool = False
     rating: int = 0
+    time_of_day_slot: Optional[str] = None
+    time_of_day_keyword: Optional[str] = None
+    time_of_day_info: Optional[str] = None
     applied_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
     @property
@@ -176,4 +179,42 @@ class WallpaperMetadata:
             "season": self.season,
             "is_favorite": self.is_favorite,
             "rating": self.rating,
+            "time_of_day_slot": self.time_of_day_slot,
+            "time_of_day_keyword": self.time_of_day_keyword,
+            "time_of_day_info": self.time_of_day_info,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WallpaperMetadata":
+        dims = data.get("dimensions", {})
+        width = dims.get("width", data.get("width", 1920))
+        height = dims.get("height", data.get("height", 1080))
+        aspect_ratio = dims.get("aspect_ratio", data.get("aspect_ratio", round(width / max(1, height), 3)))
+        return cls(
+            image_id=data.get("image_id", ""),
+            category=data.get("category", "General"),
+            provider=data.get("provider", "unknown"),
+            source_url=data.get("source_url", ""),
+            download_url=data.get("download_url", ""),
+            local_path=data.get("local_path", ""),
+            sha256=data.get("sha256", ""),
+            title=data.get("title", ""),
+            creator=data.get("creator", ""),
+            license=data.get("license", ""),
+            license_url=data.get("license_url"),
+            attribution_required=data.get("attribution_required", False),
+            attribution_text=data.get("attribution_text", ""),
+            width=int(width),
+            height=int(height),
+            aspect_ratio=float(aspect_ratio),
+            mode=data.get("mode", "Fill"),
+            dominant_color_hex=data.get("dominant_color_hex"),
+            mood=data.get("mood"),
+            season=data.get("season"),
+            is_favorite=bool(data.get("is_favorite", False)),
+            rating=int(data.get("rating", 0)),
+            time_of_day_slot=data.get("time_of_day_slot"),
+            time_of_day_keyword=data.get("time_of_day_keyword"),
+            time_of_day_info=data.get("time_of_day_info"),
+            applied_at=data.get("applied_at", datetime.utcnow().isoformat() + "Z"),
+        )

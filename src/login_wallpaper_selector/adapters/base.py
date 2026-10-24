@@ -16,9 +16,18 @@ class BaseWallpaperAdapter(ABC):
         pass
 
     @abstractmethod
-    def set_wallpaper(self, image_path: Path, mode: str = WallpaperPosition.FILL.value) -> bool:
+    def set_wallpaper(
+        self,
+        image_path: Path,
+        mode: str = WallpaperPosition.FILL.value,
+        monitor_id: Optional[str] = None,
+    ) -> bool:
         """Apply the specified image file as desktop wallpaper using Fill or Fit mode."""
         pass
+
+    def get_monitors(self) -> list[tuple[str, str]]:
+        """Return list of (monitor_id, display_label) for connected monitors."""
+        return []
 
     @abstractmethod
     def get_current_wallpaper(self) -> Optional[str]:

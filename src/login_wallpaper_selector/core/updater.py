@@ -78,14 +78,64 @@ def resolve_github_repo(config: Optional[AppConfig] = None) -> str:
     return getattr(cfg, "github_repo", "ashugit1234622/wallpaper-selector") or "ashugit1234622/wallpaper-selector"
 
 
+def check_git_remote_update(project_dir: Path, timeout_sec: float = 6.0) -> Optional[Tuple[bool, str, str]]:
+    """Check if remote git origin has newer commits than local HEAD.
+    
+    Returns (has_update, local_commit_short, remote_commit_short) or None on failure.
+    """
+    if not (project_dir / ".git").is_dir():
+        return None
+
+    try:
+        local_res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+        if local_res.returncode != 0:
+            return None
+        local_hash = local_res.stdout.strip()
+
+        # Query remote refs for origin/master, fallback to origin/main
+        remote_res = subprocess.run(
+            ["git", "ls-remote", "origin", "refs/heads/master"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+        if remote_res.returncode != 0 or not remote_res.stdout.strip():
+            remote_res = subprocess.run(
+                ["git", "ls-remote", "origin", "refs/heads/main"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+
+        if remote_res.returncode == 0 and remote_res.stdout.strip():
+            remote_hash = remote_res.stdout.strip().split()[0]
+            if remote_hash:
+                has_diff = (remote_hash != local_hash)
+                return (has_diff, local_hash[:7], remote_hash[:7])
+    except Exception:
+        pass
+    return None
+
+
 def check_for_updates(
     config: Optional[AppConfig] = None,
     force: bool = False,
     timeout_sec: float = 5.0,
 ) -> UpdateCheckResult:
-    """Check GitHub repository for newer releases.
+    """Check repository for newer releases, tags, or git commits.
     
-    Respects throttle interval unless force=True.
+    Uses hybrid detection:
+    1. GitHub Releases API (latest published release)
+    2. GitHub Tags API (latest semver tag if no release drafted)
+    3. Git remote commits (if running from a git clone)
     """
     from .. import __version__ as current_ver_str
     cfg = config or AppConfig.load()
@@ -108,21 +158,22 @@ def check_for_updates(
         except Exception:
             pass
 
-    # 2. Check GitHub Releases API
+    project_dir = Path(__file__).resolve().parents[3]
+    is_git_clone = (project_dir / ".git").is_dir()
+    curr_tuple = parse_version_tuple(current_ver_str)
+
+    # 2. Check GitHub Releases & Tags API
     api_url = f"https://api.github.com/repos/{repo_slug}/releases/latest"
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "User-Agent": f"LoginWallpaperSelector/{current_ver_str}",
     }
 
-    project_dir = Path(__file__).resolve().parents[3]
-    is_git_clone = (project_dir / ".git").is_dir()
-
     try:
         with httpx.Client(timeout=timeout_sec, follow_redirects=True) as client:
             resp = client.get(api_url, headers=headers)
 
-            # Record timestamp of successful or attempted check
+            # Record timestamp of check
             cfg.last_update_check_timestamp = datetime.now(timezone.utc).isoformat()
             try:
                 cfg.save()
@@ -139,47 +190,79 @@ def check_for_updates(
                 zipball_url = data.get("zipball_url")
                 tarball_url = data.get("tarball_url")
 
-                curr_tuple = parse_version_tuple(current_ver_str)
                 latest_tuple = parse_version_tuple(tag_name)
+                if latest_tuple > curr_tuple:
+                    return UpdateCheckResult(
+                        update_available=True,
+                        current_version=current_ver_str,
+                        latest_version=tag_name.lstrip("vV"),
+                        release_title=title,
+                        release_notes=notes,
+                        published_at=published_at,
+                        html_url=html_url,
+                        zipball_url=zipball_url,
+                        tarball_url=tarball_url,
+                        is_git_clone=is_git_clone,
+                    )
 
-                update_available = (latest_tuple > curr_tuple)
-                return UpdateCheckResult(
-                    update_available=update_available,
-                    current_version=current_ver_str,
-                    latest_version=tag_name.lstrip("vV"),
-                    release_title=title,
-                    release_notes=notes,
-                    published_at=published_at,
-                    html_url=html_url,
-                    zipball_url=zipball_url,
-                    tarball_url=tarball_url,
-                    is_git_clone=is_git_clone,
-                )
-            elif resp.status_code == 404:
-                # No releases published yet on the repository
-                return UpdateCheckResult(
-                    update_available=False,
-                    current_version=current_ver_str,
-                    latest_version=current_ver_str,
-                    is_git_clone=is_git_clone,
-                    error=f"No releases found for {repo_slug}.",
-                )
-            else:
-                return UpdateCheckResult(
-                    update_available=False,
-                    current_version=current_ver_str,
-                    latest_version=current_ver_str,
-                    is_git_clone=is_git_clone,
-                    error=f"GitHub API returned HTTP {resp.status_code}.",
-                )
-    except Exception as e:
-        return UpdateCheckResult(
-            update_available=False,
-            current_version=current_ver_str,
-            latest_version=current_ver_str,
-            is_git_clone=is_git_clone,
-            error=str(e),
-        )
+            # Check GitHub Tags API if release wasn't newer
+            try:
+                tags_resp = client.get(f"https://api.github.com/repos/{repo_slug}/tags", headers=headers)
+                if tags_resp.status_code == 200:
+                    tags_data = tags_resp.json()
+                    if isinstance(tags_data, list) and tags_data:
+                        highest_tag = None
+                        highest_tuple = curr_tuple
+                        for t in tags_data:
+                            t_name = t.get("name", "").strip()
+                            t_tuple = parse_version_tuple(t_name)
+                            if t_tuple > highest_tuple:
+                                highest_tuple = t_tuple
+                                highest_tag = t_name
+                        if highest_tag:
+                            return UpdateCheckResult(
+                                update_available=True,
+                                current_version=current_ver_str,
+                                latest_version=highest_tag.lstrip("vV"),
+                                release_title=f"Release {highest_tag}",
+                                release_notes=f"New version {highest_tag} is available on GitHub.",
+                                html_url=f"https://github.com/{repo_slug}/releases/tag/{highest_tag}",
+                                zipball_url=f"https://api.github.com/repos/{repo_slug}/zipball/{highest_tag}",
+                                tarball_url=f"https://api.github.com/repos/{repo_slug}/tarball/{highest_tag}",
+                                is_git_clone=is_git_clone,
+                            )
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    # 3. Check Git Remote Commits (if running from git clone)
+    if is_git_clone:
+        git_check = check_git_remote_update(project_dir, timeout_sec=timeout_sec)
+        if git_check and git_check[0]:
+            _, local_hash, remote_hash = git_check
+            return UpdateCheckResult(
+                update_available=True,
+                current_version=current_ver_str,
+                latest_version=f"{current_ver_str} (rev {remote_hash})",
+                release_title=f"New commits on origin/master ({remote_hash})",
+                release_notes=(
+                    f"New commits are available on remote repository.\n\n"
+                    f"• Remote commit: {remote_hash}\n"
+                    f"• Local commit:  {local_hash}\n\n"
+                    f"Click 'Update Now' to pull the latest changes, update dependencies, and restart."
+                ),
+                html_url=f"https://github.com/{repo_slug}/commits/master",
+                is_git_clone=True,
+            )
+
+    return UpdateCheckResult(
+        update_available=False,
+        current_version=current_ver_str,
+        latest_version=current_ver_str,
+        is_git_clone=is_git_clone,
+    )
 
 
 def apply_update(
@@ -315,23 +398,21 @@ def restart_application() -> None:
             if pythonw.exists():
                 python_exe = str(pythonw)
 
-        cmd = [python_exe, "-m", "login_wallpaper_selector"]
-        if sys.platform == "win32":
-            # DETACHED_PROCESS flag = 0x00000008, CREATE_NEW_PROCESS_GROUP = 0x00000200
-            creation_flags = (
-                subprocess.CREATE_NEW_PROCESS_GROUP
-                | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            )
+            # Use cmd.exe /c start "" "<python_exe>" -m login_wallpaper_selector
+            # completely detaches from console, immune to handle inheritance hangs
+            cmd = f'cmd.exe /c start "" "{python_exe}" -m login_wallpaper_selector'
             subprocess.Popen(
                 cmd,
+                shell=True,
                 cwd=cwd_dir,
-                creationflags=creation_flags,
-                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
+            cmd = [python_exe, "-m", "login_wallpaper_selector"]
             subprocess.Popen(cmd, cwd=cwd_dir, start_new_session=True)
     except Exception as e:
-        logger.error(f"Failed to spawn restart process: {e}")
         try:
             subprocess.Popen([sys.executable, "-m", "login_wallpaper_selector"])
         except Exception:

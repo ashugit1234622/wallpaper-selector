@@ -13,7 +13,12 @@ class MacWallpaperAdapter(BaseWallpaperAdapter):
     def platform_name(self) -> str:
         return "macOS Desktop"
 
-    def set_wallpaper(self, image_path: Path, mode: str = WallpaperPosition.FILL.value) -> bool:
+    def set_wallpaper(
+        self,
+        image_path: Path,
+        mode: str = WallpaperPosition.FILL.value,
+        monitor_id: Optional[str] = None,
+    ) -> bool:
         if not image_path.exists() or not image_path.is_file():
             return False
 

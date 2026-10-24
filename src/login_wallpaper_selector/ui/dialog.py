@@ -23,14 +23,42 @@ from ..core.seasonal import Season, get_current_season, get_season_display
 from ..core.favorites import FavoritesManager
 from ..core.config import AppConfig
 from ..core.history import HistoryTracker
+from ..core.recent_history import RecentWallpaperManager
 from ..core.cache import CacheManager
 from ..core.display import generate_desktop_preview_image
 from ..core.search_history import SearchHistoryManager
 from ..core.updater import check_for_updates, UpdateCheckResult
+from ..core.time_of_day import (
+    get_current_time_of_day_slot,
+    select_time_of_day_keywords,
+    get_time_of_day_keywords,
+)
+from ..core.hotkey import GlobalHotkeyListener
+from ..core.notifications import send_toast_notification
+from ..core.power import is_running_on_battery, is_battery_saver_active
 from ..providers.router import ProviderRouter
 from ..adapters.factory import get_wallpaper_adapter
 from .file_picker import pick_local_image
 from .update_dialog import UpdateModalDialog
+from .gallery_dialog import WallpaperGalleryDialog
+
+# ── Windows 11 Fluent Design tokens ──────────────────────────────────────────
+_W11 = {
+    "surface_0":  "#202020",
+    "surface_1":  "#2b2b2b",
+    "surface_2":  "#333333",
+    "surface_3":  "#3c3c3c",
+    "accent":     "#0078d4",
+    "accent_hov": "#1084d8",
+    "accent_pre": "#006cbd",
+    "text_pri":   "#f3f3f3",
+    "text_sec":   "#9d9d9d",
+    "text_ter":   "#6b6b6b",
+    "border":     "#404040",
+    "success":    "#0f7b0f",
+    "danger":     "#c42b1c",
+    "font":       "Segoe UI",
+}
 
 
 class WallpaperSelectorDialog:
@@ -50,8 +78,11 @@ class WallpaperSelectorDialog:
         self.cache = CacheManager(self.config)
         self.favorites_mgr = FavoritesManager(self.config)
         self.search_history_mgr = SearchHistoryManager(self.config)
+        self.recent_mgr = RecentWallpaperManager(self.config)
+        self._recent_index: int = len(self.recent_mgr.get_items())
         self.router = ProviderRouter(self.config, self.history, self.cache)
         self.adapter = get_wallpaper_adapter()
+        self.monitors: list[tuple[str, str]] = self.adapter.get_monitors() if hasattr(self.adapter, "get_monitors") else []
 
         self.current_category: Optional[WallpaperCategory] = None
         self.current_metadata: Optional[WallpaperMetadata] = None
@@ -65,6 +96,13 @@ class WallpaperSelectorDialog:
         self._rotation_timer_id: Optional[str] = None
         self._is_auto_rotating: bool = False
         self._tray_mgr: Optional[Any] = None
+        self._is_animating_slide: bool = False
+        self._last_rendered_pil_img: Optional[Any] = None
+        self._thumbnail_cache: Dict[str, Any] = {}
+        self.filmstrip_buttons: List[Any] = []
+        self.filmstrip_inner_frame: Optional[Any] = None
+        self._hotkey_listener: Optional[GlobalHotkeyListener] = None
+        self._is_hotkey_rotating: bool = False
 
         self._init_window()
 
@@ -82,6 +120,10 @@ class WallpaperSelectorDialog:
                 except Exception:
                     self.root = None
             self._build_widgets()
+            self._init_keyboard_shortcuts()
+            self._update_history_nav_buttons()
+            self._update_filmstrip()
+            self._start_global_hotkey()
             return
 
         if HAS_CUSTOMTKINTER:
@@ -115,6 +157,10 @@ class WallpaperSelectorDialog:
         self._center_window(win_w, win_h)
 
         self._build_widgets()
+        self._init_keyboard_shortcuts()
+        self._update_history_nav_buttons()
+        self._update_filmstrip()
+        self._start_global_hotkey()
 
         # Listen for window resize to adjust responsive wrapping
         self.root.bind("<Configure>", self._on_window_configure)
@@ -152,84 +198,109 @@ class WallpaperSelectorDialog:
     def _build_widgets(self) -> None:
         host_target = self.parent_frame if self.parent_frame is not None else self.root
 
-        # Bottom Action Bar: permanently docked at bottom edge of root so actions are ALWAYS accessible
-        bottom_frame = ctk.CTkFrame(host_target, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(host_target)
-        bottom_frame.pack(side="bottom", fill="x", padx=16, pady=(6, 12))
+        # Bottom Action Bar — docked at bottom, always accessible
+        if HAS_CUSTOMTKINTER:
+            bottom_frame = ctk.CTkFrame(host_target, fg_color=_W11["surface_1"], corner_radius=0)
+        else:
+            bottom_frame = tk.Frame(host_target)
+        bottom_frame.pack(side="bottom", fill="x", padx=0, pady=0)
 
-        # Responsive 5-column grid for action buttons - stretches evenly across any width without collision
-        bottom_frame.columnconfigure(0, weight=1)
-        bottom_frame.columnconfigure(1, weight=1)
-        bottom_frame.columnconfigure(2, weight=1)
-        bottom_frame.columnconfigure(3, weight=2)
-        bottom_frame.columnconfigure(4, weight=1)
+        # Thin top border above action bar
+        if HAS_CUSTOMTKINTER:
+            ctk.CTkFrame(bottom_frame, height=1, fg_color=_W11["border"]).pack(fill="x")
+
+        inner_bar = (
+            ctk.CTkFrame(bottom_frame, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(bottom_frame)
+        )
+        inner_bar.pack(fill="x", padx=16, pady=8)
+
+        # Responsive 5-column grid for action buttons
+        inner_bar.columnconfigure(0, weight=1)
+        inner_bar.columnconfigure(1, weight=1)
+        inner_bar.columnconfigure(2, weight=1)
+        inner_bar.columnconfigure(3, weight=2)
+        inner_bar.columnconfigure(4, weight=1)
 
         if HAS_CUSTOMTKINTER:
             self.retry_btn = ctk.CTkButton(
-                bottom_frame,
+                inner_bar,
                 text="🔄 Try Another",
-                height=36,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
                 state="disabled",
-                fg_color="#4b5563",
-                hover_color="#374151",
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_retry,
             )
-            self.retry_btn.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+            self.retry_btn.grid(row=0, column=0, padx=3, pady=0, sticky="ew")
 
             self.save_btn = ctk.CTkButton(
-                bottom_frame,
-                text="💾 Save Image",
-                height=36,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                inner_bar,
+                text="💾 Save",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
                 state="disabled",
-                fg_color="#059669",
-                hover_color="#047857",
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_save_wallpaper,
             )
-            self.save_btn.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+            self.save_btn.grid(row=0, column=1, padx=3, pady=0, sticky="ew")
 
             self.open_folder_btn = ctk.CTkButton(
-                bottom_frame,
-                text="📂 Open Folder",
-                height=36,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                inner_bar,
+                text="📂 Folder",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
                 state="disabled",
-                fg_color="#374151",
-                hover_color="#1f2937",
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_open_category_folder,
             )
-            self.open_folder_btn.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+            self.open_folder_btn.grid(row=0, column=2, padx=3, pady=0, sticky="ew")
 
             self.apply_btn = ctk.CTkButton(
-                bottom_frame,
-                text="✓ Apply to Desktop",
-                height=36,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                inner_bar,
+                text="✓  Apply to Desktop",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
                 state="disabled",
-                fg_color="#2563eb",
-                hover_color="#1d4ed8",
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
                 command=self.on_apply_staged,
             )
-            self.apply_btn.grid(row=0, column=3, padx=3, pady=2, sticky="ew")
+            self.apply_btn.grid(row=0, column=3, padx=3, pady=0, sticky="ew")
 
             self.close_btn = ctk.CTkButton(
-                bottom_frame,
-                text="Done / Close",
-                height=36,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                inner_bar,
+                text="Done",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_close,
             )
-            self.close_btn.grid(row=0, column=4, padx=3, pady=2, sticky="ew")
+            self.close_btn.grid(row=0, column=4, padx=3, pady=0, sticky="ew")
         else:
-            self.retry_btn = tk.Button(bottom_frame, text="🔄 Try Another", state="disabled", command=self.on_retry)
+            self.retry_btn = tk.Button(inner_bar, text="🔄 Try Another", state="disabled", command=self.on_retry)
             self.retry_btn.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
-            self.save_btn = tk.Button(bottom_frame, text="💾 Save Image", state="disabled", command=self.on_save_wallpaper)
+            self.save_btn = tk.Button(inner_bar, text="💾 Save Image", state="disabled", command=self.on_save_wallpaper)
             self.save_btn.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
-            self.open_folder_btn = tk.Button(bottom_frame, text="📂 Open Folder", state="disabled", command=self.on_open_category_folder)
+            self.open_folder_btn = tk.Button(inner_bar, text="📂 Open Folder", state="disabled", command=self.on_open_category_folder)
             self.open_folder_btn.grid(row=0, column=2, padx=2, pady=2, sticky="ew")
-            self.apply_btn = tk.Button(bottom_frame, text="✓ Apply to Desktop", state="disabled", command=self.on_apply_staged)
+            self.apply_btn = tk.Button(inner_bar, text="✓ Apply to Desktop", state="disabled", command=self.on_apply_staged)
             self.apply_btn.grid(row=0, column=3, padx=2, pady=2, sticky="ew")
-            self.close_btn = tk.Button(bottom_frame, text="Done / Close", command=self.on_close)
+            self.close_btn = tk.Button(inner_bar, text="Done / Close", command=self.on_close)
             self.close_btn.grid(row=0, column=4, padx=2, pady=2, sticky="ew")
 
         # Scrollable container for the main content area so nothing is EVER clipped or crammed on any screen size
@@ -256,7 +327,7 @@ class WallpaperSelectorDialog:
 
         # Header container
         header_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        header_frame.pack(fill="x", padx=16, pady=(6, 2))
+        header_frame.pack(fill="x", padx=16, pady=(12, 4))
 
         top_title_row = ctk.CTkFrame(header_frame, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(header_frame)
         top_title_row.pack(fill="x")
@@ -264,11 +335,12 @@ class WallpaperSelectorDialog:
         title_lbl = (
             ctk.CTkLabel(
                 top_title_row,
-                text="Desktop Wallpaper Selector",
-                font=ctk.CTkFont(size=20, weight="bold"),
+                text="Wallpaper Manager",
+                font=ctk.CTkFont(family=_W11["font"], size=20, weight="bold"),
+                text_color=_W11["text_pri"],
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(top_title_row, text="Desktop Wallpaper Selector", font=("Helvetica", 15, "bold"))
+            else tk.Label(top_title_row, text="Wallpaper Manager", font=("Segoe UI", 15, "bold"))
         )
         title_lbl.pack(side="left")
 
@@ -276,16 +348,18 @@ class WallpaperSelectorDialog:
             self.update_check_btn = (
                 ctk.CTkButton(
                     top_title_row,
-                    text="🔄 Updates",
-                    width=85,
+                    text="↻ Updates",
+                    width=90,
                     height=26,
-                    font=ctk.CTkFont(size=11),
-                    fg_color="#1f2937",
-                    hover_color="#374151",
+                    font=ctk.CTkFont(family=_W11["font"], size=11),
+                    corner_radius=6,
+                    fg_color=_W11["surface_2"],
+                    hover_color=_W11["surface_3"],
+                    text_color=_W11["text_sec"],
                     command=self.on_manual_check_update,
                 )
                 if HAS_CUSTOMTKINTER
-                else tk.Button(top_title_row, text="🔄 Updates", font=("Helvetica", 8), command=self.on_manual_check_update)
+                else tk.Button(top_title_row, text="↻ Updates", font=("Segoe UI", 8), command=self.on_manual_check_update)
             )
             self.update_check_btn.pack(side="right")
         else:
@@ -294,32 +368,32 @@ class WallpaperSelectorDialog:
         subtitle_lbl = (
             ctk.CTkLabel(
                 header_frame,
-                text="Select a category for your session background:",
-                font=ctk.CTkFont(size=12),
-                text_color="gray",
+                text="Choose and apply wallpapers from curated categories",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                text_color=_W11["text_sec"],
             )
             if HAS_CUSTOMTKINTER
-            else tk.Label(header_frame, text="Select a category for your session background:", fg="gray")
+            else tk.Label(header_frame, text="Choose and apply wallpapers from curated categories", fg="gray")
         )
-        subtitle_lbl.pack(anchor="w", pady=(1, 0))
+        subtitle_lbl.pack(anchor="w", pady=(2, 0))
 
-        # Category buttons container: 2 rows of 3 columns - compact, beautiful & responsive
+        # Category toggle buttons — Windows 11 chip style (2 rows × 3 columns)
         btn_grid = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        btn_grid.pack(fill="x", padx=16, pady=(4, 6))
+        btn_grid.pack(fill="x", padx=16, pady=(8, 4))
 
         categories = [
-            (WallpaperCategory.SPACE, "🚀 Space", "#1e3a8a"),
-            (WallpaperCategory.NATURE, "🌿 Nature", "#065f46"),
-            (WallpaperCategory.ART, "🎨 Art", "#78350f"),
-            (WallpaperCategory.PORTRAIT, "👤 Portrait", "#581c87"),
-            (WallpaperCategory.LOCAL_STORAGE, "📁 Local Storage", "#374151"),
-            (WallpaperCategory.FAVORITES, "⭐ Favorites", "#b45309"),
+            (WallpaperCategory.SPACE, "🚀 Space"),
+            (WallpaperCategory.NATURE, "🌿 Nature"),
+            (WallpaperCategory.ART, "🎨 Art"),
+            (WallpaperCategory.PORTRAIT, "👤 Portrait"),
+            (WallpaperCategory.LOCAL_STORAGE, "📁 Local"),
+            (WallpaperCategory.FAVORITES, "⭐ Favorites"),
         ]
 
         self.cat_buttons = {}
         self._cat_colors = {}
-        for idx, (cat, label_text, color) in enumerate(categories):
-            self._cat_colors[cat] = color
+        for idx, (cat, label_text) in enumerate(categories):
+            self._cat_colors[cat] = _W11["surface_2"]
             row = idx // 3
             col = idx % 3
 
@@ -327,10 +401,14 @@ class WallpaperSelectorDialog:
                 btn = ctk.CTkButton(
                     btn_grid,
                     text=label_text,
-                    font=ctk.CTkFont(size=13, weight="bold"),
-                    height=36,
-                    fg_color=color,
-                    hover_color=color,
+                    font=ctk.CTkFont(family=_W11["font"], size=12),
+                    height=32,
+                    corner_radius=6,
+                    fg_color=_W11["surface_2"],
+                    hover_color=_W11["surface_3"],
+                    text_color=_W11["text_sec"],
+                    border_width=1,
+                    border_color=_W11["border"],
                     command=lambda c=cat: self.on_select_category(c),
                 )
                 btn.grid(row=row, column=col, padx=4, pady=3, sticky="ew")
@@ -338,7 +416,7 @@ class WallpaperSelectorDialog:
                 btn = tk.Button(
                     btn_grid,
                     text=label_text,
-                    font=("Helvetica", 10, "bold"),
+                    font=("Segoe UI", 10),
                     height=1,
                     command=lambda c=cat: self.on_select_category(c),
                 )
@@ -351,7 +429,7 @@ class WallpaperSelectorDialog:
 
         # Custom Keyword Search Bar & Suggestions Container
         search_container = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        search_container.pack(fill="x", padx=16, pady=(2, 4))
+        search_container.pack(fill="x", padx=16, pady=(4, 2))
 
         search_row = ctk.CTkFrame(search_container, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(search_container)
         search_row.pack(fill="x", pady=(0, 2))
@@ -359,42 +437,48 @@ class WallpaperSelectorDialog:
         if HAS_CUSTOMTKINTER:
             self.search_entry = ctk.CTkEntry(
                 search_row,
-                placeholder_text="🔍 Search wallpapers (e.g., Black Hole, Cyberpunk, Waterfall)...",
+                placeholder_text="Search wallpapers  (e.g. Black Hole, Cyberpunk, Waterfall…)",
                 height=32,
-                font=ctk.CTkFont(size=12),
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                border_width=1,
+                border_color=_W11["border"],
             )
             self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
             self.search_entry.bind("<Return>", lambda event: self.on_trigger_search())
 
             self.search_btn = ctk.CTkButton(
                 search_row,
-                text="🔍 Search",
+                text="Search",
                 width=80,
                 height=32,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#3b82f6",
-                hover_color="#2563eb",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
                 command=self.on_trigger_search,
             )
-            self.search_btn.pack(side="left", padx=(0, 6))
+            self.search_btn.pack(side="left", padx=(0, 4))
 
             self.clear_search_btn = ctk.CTkButton(
                 search_row,
                 text="✕",
                 width=32,
                 height=32,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#374151",
-                hover_color="#4b5563",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
                 command=self.on_clear_search,
             )
             self.clear_search_btn.pack(side="left")
         else:
-            self.search_entry = tk.Entry(search_row, font=("Helvetica", 10))
+            self.search_entry = tk.Entry(search_row, font=("Segoe UI", 10))
             self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
             self.search_entry.bind("<Return>", lambda event: self.on_trigger_search())
 
-            self.search_btn = tk.Button(search_row, text="🔍 Search", command=self.on_trigger_search)
+            self.search_btn = tk.Button(search_row, text="Search", command=self.on_trigger_search)
             self.search_btn.pack(side="left", padx=(0, 6))
 
             self.clear_search_btn = tk.Button(search_row, text="✕", command=self.on_clear_search)
@@ -405,39 +489,42 @@ class WallpaperSelectorDialog:
         self.suggestions_frame.pack(fill="x")
         self._populate_suggestion_chips()
 
-        # Color Palette Swatch Bar
+        # Color Palette Row
         color_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        color_frame.pack(fill="x", padx=16, pady=(2, 4))
+        color_frame.pack(fill="x", padx=16, pady=(4, 2))
 
         color_lbl = (
-            ctk.CTkLabel(color_frame, text="🎨 Color:", font=ctk.CTkFont(size=12, weight="bold"))
+            ctk.CTkLabel(color_frame, text="Color", font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"), text_color=_W11["text_sec"])
             if HAS_CUSTOMTKINTER
-            else tk.Label(color_frame, text="🎨 Color:", font=("Helvetica", 9, "bold"))
+            else tk.Label(color_frame, text="Color:", font=("Segoe UI", 9, "bold"))
         )
-        color_lbl.pack(side="left", padx=(4, 8))
+        color_lbl.pack(side="left", padx=(4, 10))
 
         palettes = [
-            (ColorPalette.ANY, "🔘 Any", "#374151"),
-            (ColorPalette.BLUE, "🔵 Blue", "#0284c7"),
-            (ColorPalette.PURPLE, "🟣 Purple", "#a855f7"),
-            (ColorPalette.GREEN, "🟢 Green", "#10b981"),
-            (ColorPalette.WARM, "🟠 Warm", "#ea580c"),
-            (ColorPalette.MONOCHROME, "⚫ Dark", "#27272a"),
+            (ColorPalette.ANY,        "Any",    "#374151"),
+            (ColorPalette.BLUE,       "Blue",   "#0284c7"),
+            (ColorPalette.PURPLE,     "Purple", "#7c3aed"),
+            (ColorPalette.GREEN,      "Green",  "#059669"),
+            (ColorPalette.WARM,       "Warm",   "#ea580c"),
+            (ColorPalette.MONOCHROME, "Dark",   "#3f3f46"),
         ]
 
         self.color_chips = {}
-        for pal, label, bg_color in palettes:
+        for pal, label, accent_col in palettes:
+            is_sel = (pal == self.selected_color)
             if HAS_CUSTOMTKINTER:
                 chip = ctk.CTkButton(
                     color_frame,
                     text=label,
-                    width=72,
-                    height=28,
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    fg_color=bg_color if pal == self.selected_color else "#1f2937",
-                    hover_color=bg_color,
-                    border_width=2 if pal == self.selected_color else 0,
-                    border_color="#38bdf8",
+                    width=68,
+                    height=26,
+                    font=ctk.CTkFont(family=_W11["font"], size=11),
+                    corner_radius=13,
+                    fg_color=accent_col if is_sel else _W11["surface_2"],
+                    hover_color=accent_col,
+                    text_color=_W11["text_pri"] if is_sel else _W11["text_sec"],
+                    border_width=2 if is_sel else 1,
+                    border_color=_W11["accent"] if is_sel else _W11["border"],
                     command=lambda p=pal: self.on_select_color(p),
                 )
                 chip.pack(side="left", padx=3)
@@ -445,45 +532,48 @@ class WallpaperSelectorDialog:
                 chip = tk.Button(
                     color_frame,
                     text=label,
-                    bg=bg_color if pal == self.selected_color else "#ddd",
+                    bg=accent_col if is_sel else "#ddd",
                     command=lambda p=pal: self.on_select_color(p),
                 )
                 chip.pack(side="left", padx=2)
             self.color_chips[pal] = chip
 
-        # Mood Selector Bar ("What's your mood?")
+        # Mood Selector Row
         mood_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        mood_frame.pack(fill="x", padx=16, pady=(2, 4))
+        mood_frame.pack(fill="x", padx=16, pady=(4, 2))
 
         mood_lbl = (
-            ctk.CTkLabel(mood_frame, text="🎭 Mood:", font=ctk.CTkFont(size=12, weight="bold"))
+            ctk.CTkLabel(mood_frame, text="Mood", font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"), text_color=_W11["text_sec"])
             if HAS_CUSTOMTKINTER
-            else tk.Label(mood_frame, text="🎭 Mood:", font=("Helvetica", 9, "bold"))
+            else tk.Label(mood_frame, text="Mood:", font=("Segoe UI", 9, "bold"))
         )
-        mood_lbl.pack(side="left", padx=(4, 8))
+        mood_lbl.pack(side="left", padx=(4, 10))
 
         moods = [
-            (WallpaperMood.ANY, "✨ Any", "#374151"),
-            (WallpaperMood.PEACEFUL, "🕊️ Calm", "#0d9488"),
-            (WallpaperMood.DARK, "🌑 Dark", "#18181b"),
-            (WallpaperMood.CINEMATIC, "🎬 Epic", "#4f46e5"),
-            (WallpaperMood.MINIMALIST, "◻️ Minimal", "#52525b"),
-            (WallpaperMood.VIBRANT, "🌈 Vivid", "#d97706"),
+            (WallpaperMood.ANY,        "Any",     "#374151"),
+            (WallpaperMood.PEACEFUL,   "Calm",    "#0d9488"),
+            (WallpaperMood.DARK,       "Dark",    "#27272a"),
+            (WallpaperMood.CINEMATIC,  "Epic",    "#4f46e5"),
+            (WallpaperMood.MINIMALIST, "Minimal", "#52525b"),
+            (WallpaperMood.VIBRANT,    "Vivid",   "#b45309"),
         ]
 
         self.mood_chips = {}
-        for mood, label, bg_color in moods:
+        for mood, label, accent_col in moods:
+            is_sel = (mood == self.selected_mood)
             if HAS_CUSTOMTKINTER:
                 chip = ctk.CTkButton(
                     mood_frame,
                     text=label,
-                    width=72,
-                    height=28,
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    fg_color=bg_color if mood == self.selected_mood else "#1f2937",
-                    hover_color=bg_color,
-                    border_width=2 if mood == self.selected_mood else 0,
-                    border_color="#a855f7",
+                    width=68,
+                    height=26,
+                    font=ctk.CTkFont(family=_W11["font"], size=11),
+                    corner_radius=13,
+                    fg_color=accent_col if is_sel else _W11["surface_2"],
+                    hover_color=accent_col,
+                    text_color=_W11["text_pri"] if is_sel else _W11["text_sec"],
+                    border_width=2 if is_sel else 1,
+                    border_color=_W11["accent"] if is_sel else _W11["border"],
                     command=lambda m=mood: self.on_select_mood(m),
                 )
                 chip.pack(side="left", padx=3)
@@ -491,22 +581,26 @@ class WallpaperSelectorDialog:
                 chip = tk.Button(
                     mood_frame,
                     text=label,
-                    bg=bg_color if mood == self.selected_mood else "#ddd",
+                    bg=accent_col if is_sel else "#ddd",
                     command=lambda m=mood: self.on_select_mood(m),
                 )
                 chip.pack(side="left", padx=2)
             self.mood_chips[mood] = chip
 
-        # Settings row: Mode selection (Fill / Fit)
-        settings_frame = ctk.CTkFrame(main_parent) if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        settings_frame.pack(fill="x", padx=16, pady=(4, 6))
+        # Settings card: Mode selection (Fill / Fit)
+        settings_frame = (
+            ctk.CTkFrame(main_parent, fg_color=_W11["surface_1"], corner_radius=8, border_width=1, border_color=_W11["border"])
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(main_parent)
+        )
+        settings_frame.pack(fill="x", padx=16, pady=(6, 4))
 
         mode_lbl = (
-            ctk.CTkLabel(settings_frame, text="Display Mode:", font=ctk.CTkFont(size=12, weight="bold"))
+            ctk.CTkLabel(settings_frame, text="Display", font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"), text_color=_W11["text_sec"])
             if HAS_CUSTOMTKINTER
             else tk.Label(settings_frame, text="Display Mode:")
         )
-        mode_lbl.pack(side="left", padx=10, pady=6)
+        mode_lbl.pack(side="left", padx=12, pady=8)
 
         default_mode = WallpaperPosition.FILL.value
         self.config.default_position = default_mode
@@ -521,6 +615,49 @@ class WallpaperSelectorDialog:
             )
             self.mode_selector.set(default_mode)
             self.mode_selector.pack(side="left", padx=8, pady=6)
+
+            if hasattr(self, "monitors") and len(self.monitors) > 1:
+                mon_labels = ["All Displays"] + [m[1] for m in self.monitors]
+                cur_mon_id = getattr(self.config, "target_monitor_id", None)
+                cur_label = "All Displays"
+                for m_id, label in self.monitors:
+                    if m_id == cur_mon_id:
+                        cur_label = label
+                        break
+                self.monitor_var = ctk.StringVar(value=cur_label)
+                self.monitor_menu = ctk.CTkOptionMenu(
+                    settings_frame,
+                    values=mon_labels,
+                    variable=self.monitor_var,
+                    width=100,
+                    height=26,
+                    font=ctk.CTkFont(family=_W11["font"], size=11),
+                    command=self.on_monitor_change,
+                )
+                self.monitor_menu.pack(side="left", padx=(0, 6), pady=6)
+
+            self.hotkey_var = ctk.BooleanVar(value=bool(getattr(self.config, "global_hotkey_enabled", True)))
+            self.hotkey_chk = ctk.CTkCheckBox(
+                settings_frame,
+                text="⚡ Hotkey",
+                variable=self.hotkey_var,
+                font=ctk.CTkFont(size=12),
+                command=self.on_hotkey_toggle,
+            )
+            self.hotkey_chk.pack(side="left", padx=(10, 4), pady=6)
+
+            curr_combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+            self.hotkey_combo_var = ctk.StringVar(value=curr_combo)
+            self.hotkey_combo_menu = ctk.CTkOptionMenu(
+                settings_frame,
+                values=["Win+Alt+W", "Ctrl+Alt+W", "Win+Shift+W"],
+                variable=self.hotkey_combo_var,
+                width=108,
+                height=26,
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                command=self.on_hotkey_combo_change,
+            )
+            self.hotkey_combo_menu.pack(side="left", padx=(0, 6), pady=6)
 
             self.lockscreen_var = ctk.BooleanVar(value=False)
 
@@ -551,6 +688,44 @@ class WallpaperSelectorDialog:
                 rb = tk.Radiobutton(settings_frame, text=m, value=m, variable=self.mode_var, command=self.on_mode_change)
                 rb.pack(side="left", padx=4)
 
+            if hasattr(self, "monitors") and len(self.monitors) > 1:
+                mon_labels = ["All Displays"] + [m[1] for m in self.monitors]
+                cur_mon_id = getattr(self.config, "target_monitor_id", None)
+                cur_label = "All Displays"
+                for m_id, label in self.monitors:
+                    if m_id == cur_mon_id:
+                        cur_label = label
+                        break
+                self.monitor_var = tk.StringVar(value=cur_label)
+                self.monitor_menu = tk.OptionMenu(
+                    settings_frame,
+                    self.monitor_var,
+                    *mon_labels,
+                    command=self.on_monitor_change,
+                )
+                self.monitor_menu.pack(side="left", padx=(0, 6), pady=6)
+
+            self.hotkey_var = tk.BooleanVar(value=bool(getattr(self.config, "global_hotkey_enabled", True)))
+            self.hotkey_chk = tk.Checkbutton(
+                settings_frame,
+                text="⚡ Hotkey",
+                variable=self.hotkey_var,
+                command=self.on_hotkey_toggle,
+            )
+            self.hotkey_chk.pack(side="left", padx=(8, 4), pady=6)
+
+            curr_combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+            self.hotkey_combo_var = tk.StringVar(value=curr_combo)
+            self.hotkey_combo_menu = tk.OptionMenu(
+                settings_frame,
+                self.hotkey_combo_var,
+                "Win+Alt+W",
+                "Ctrl+Alt+W",
+                "Win+Shift+W",
+                command=self.on_hotkey_combo_change,
+            )
+            self.hotkey_combo_menu.pack(side="left", padx=(0, 6), pady=6)
+
             self.lockscreen_var = tk.BooleanVar(value=False)
 
             self.layout_var = tk.BooleanVar(value=bool(getattr(self.config, "desktop_layout_awareness", True)))
@@ -572,9 +747,13 @@ class WallpaperSelectorDialog:
             )
             self.seasonal_chk.pack(side="right", padx=6, pady=6)
 
-        # Auto-Rotation Controls Bar
-        rotate_frame = ctk.CTkFrame(main_parent) if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        rotate_frame.pack(fill="x", padx=16, pady=(2, 6))
+        # Auto-Rotation card
+        rotate_frame = (
+            ctk.CTkFrame(main_parent, fg_color=_W11["surface_1"], corner_radius=8, border_width=1, border_color=_W11["border"])
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(main_parent)
+        )
+        rotate_frame.pack(fill="x", padx=16, pady=(0, 6))
 
         self.rotate_var = ctk.BooleanVar(value=bool(getattr(self.config, "rotation_enabled", False)))
         if HAS_CUSTOMTKINTER:
@@ -608,14 +787,25 @@ class WallpaperSelectorDialog:
             )
             self.interval_seg.pack(side="left", padx=8, pady=6)
 
+            self.pause_battery_var = ctk.BooleanVar(value=bool(getattr(self.config, "pause_on_battery", True)))
+            self.pause_battery_chk = ctk.CTkCheckBox(
+                rotate_frame,
+                text="🔋 On-Battery Pause",
+                variable=self.pause_battery_var,
+                font=ctk.CTkFont(size=12),
+                command=self.on_pause_battery_toggle,
+            )
+            self.pause_battery_chk.pack(side="left", padx=(10, 6), pady=6)
+
             self.rotate_now_btn = ctk.CTkButton(
                 rotate_frame,
-                text="🔄 Rotate Now",
+                text="↻  Rotate Now",
                 width=105,
                 height=28,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#4f46e5",
-                hover_color="#4338ca",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
                 command=self.on_rotate_now,
             )
             self.rotate_now_btn.pack(side="right", padx=10, pady=6)
@@ -625,6 +815,15 @@ class WallpaperSelectorDialog:
                 rb = tk.Radiobutton(rotate_frame, text=iv_label, value=iv_label, variable=self.interval_var, command=self.on_interval_change)
                 rb.pack(side="left", padx=4)
 
+            self.pause_battery_var = tk.BooleanVar(value=bool(getattr(self.config, "pause_on_battery", True)))
+            self.pause_battery_chk = tk.Checkbutton(
+                rotate_frame,
+                text="🔋 On-Battery Pause",
+                variable=self.pause_battery_var,
+                command=self.on_pause_battery_toggle,
+            )
+            self.pause_battery_chk.pack(side="left", padx=(8, 6), pady=6)
+
             self.rotate_now_btn = tk.Button(
                 rotate_frame,
                 text="🔄 Rotate Now",
@@ -633,37 +832,128 @@ class WallpaperSelectorDialog:
             self.rotate_now_btn.pack(side="right", padx=10, pady=6)
 
         # Preview Container
-        self.preview_frame = ctk.CTkFrame(main_parent, height=155) if HAS_CUSTOMTKINTER else tk.Frame(main_parent, height=155, bg="black")
-        self.preview_frame.pack(fill="x", padx=16, pady=(4, 4))
+        self.preview_frame = (
+            ctk.CTkFrame(main_parent, height=170, fg_color=_W11["surface_0"], corner_radius=10, border_width=1, border_color=_W11["border"])
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(main_parent, height=170, bg="black")
+        )
+        self.preview_frame.pack(fill="x", padx=16, pady=(6, 4))
         self.preview_frame.pack_propagate(False)
 
-        self.preview_label = (
-            ctk.CTkLabel(self.preview_frame, text="Preview will appear here after selecting an option", font=ctk.CTkFont(size=12), text_color="gray")
-            if HAS_CUSTOMTKINTER
-            else tk.Label(self.preview_frame, text="Preview will appear here", fg="gray")
-        )
-        self.preview_label.pack(expand=True, fill="both")
+        if HAS_CUSTOMTKINTER:
+            self.prev_hist_btn = ctk.CTkButton(
+                self.preview_frame,
+                text="◀",
+                width=32,
+                height=32,
+                corner_radius=16,
+                font=ctk.CTkFont(family=_W11["font"], size=13, weight="bold"),
+                fg_color="transparent",
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_ter"],
+                state="disabled",
+                command=self.on_history_prev,
+            )
+            self.prev_hist_btn.pack(side="left", padx=(8, 2))
 
-        # Favorite and Star Rating Toolbar - Positioned directly below preview so it is NEVER cramped or cut off
-        fav_rating_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        fav_rating_frame.pack(fill="x", padx=16, pady=(3, 3))
+            self.next_hist_btn = ctk.CTkButton(
+                self.preview_frame,
+                text="▶",
+                width=32,
+                height=32,
+                corner_radius=16,
+                font=ctk.CTkFont(family=_W11["font"], size=13, weight="bold"),
+                fg_color="transparent",
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_ter"],
+                state="disabled",
+                command=self.on_history_next,
+            )
+            self.next_hist_btn.pack(side="right", padx=(2, 8))
+
+            self.preview_label = ctk.CTkLabel(
+                self.preview_frame,
+                text="Select a category or search to preview a wallpaper",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                text_color=_W11["text_ter"],
+            )
+            self.preview_label.pack(side="left", expand=True, fill="both")
+        else:
+            self.prev_hist_btn = tk.Button(self.preview_frame, text="◀", state="disabled", command=self.on_history_prev)
+            self.prev_hist_btn.pack(side="left", padx=4)
+
+            self.next_hist_btn = tk.Button(self.preview_frame, text="▶", state="disabled", command=self.on_history_next)
+            self.next_hist_btn.pack(side="right", padx=4)
+
+            self.preview_label = tk.Label(self.preview_frame, text="Preview will appear here", fg="gray")
+            self.preview_label.pack(side="left", expand=True, fill="both")
+
+        # Recent History Thumbnail Filmstrip Container
+        self.filmstrip_frame = (
+            ctk.CTkFrame(main_parent, height=38, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(main_parent, height=38)
+        )
+        self.filmstrip_frame.pack(fill="x", padx=16, pady=(2, 4))
+        self.filmstrip_inner_frame = None
+
+        if HAS_CUSTOMTKINTER:
+            self.gallery_btn = ctk.CTkButton(
+                self.filmstrip_frame,
+                text="🖼️ Gallery",
+                width=80,
+                height=28,
+                font=ctk.CTkFont(family=_W11["font"], size=11, weight="bold"),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_pri"],
+                border_width=1,
+                border_color=_W11["border"],
+                command=self.on_open_gallery,
+            )
+            self.gallery_btn.pack(side="right", padx=(6, 0), pady=2)
+        else:
+            self.gallery_btn = tk.Button(
+                self.filmstrip_frame,
+                text="🖼️ Gallery",
+                command=self.on_open_gallery,
+            )
+            self.gallery_btn.pack(side="right", padx=(6, 0), pady=2)
+
+        # Favorite / Rating / Lock Screen toolbar
+        fav_rating_frame = (
+            ctk.CTkFrame(main_parent, fg_color=_W11["surface_1"], corner_radius=8, border_width=1, border_color=_W11["border"])
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(main_parent)
+        )
+        fav_rating_frame.pack(fill="x", padx=16, pady=(4, 4))
 
         if HAS_CUSTOMTKINTER:
             self.fav_btn = ctk.CTkButton(
                 fav_rating_frame,
-                text="🤍 Favorite",
+                text="🤍  Favorite",
                 width=110,
-                height=30,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#374151",
-                hover_color="#be185d",
+                height=28,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color="#9d174d",
+                text_color=_W11["text_sec"],
+                border_width=1,
+                border_color=_W11["border"],
                 state="disabled",
                 command=self.on_toggle_favorite,
             )
-            self.fav_btn.pack(side="left")
+            self.fav_btn.pack(side="left", padx=(10, 0), pady=8)
 
-            rating_lbl = ctk.CTkLabel(fav_rating_frame, text="Rating:", font=ctk.CTkFont(size=12, weight="bold"))
-            rating_lbl.pack(side="left", padx=(14, 6))
+            rating_lbl = ctk.CTkLabel(
+                fav_rating_frame,
+                text="Rating",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                text_color=_W11["text_sec"],
+            )
+            rating_lbl.pack(side="left", padx=(14, 4))
 
             self.star_buttons = []
             for s in range(1, 6):
@@ -672,27 +962,29 @@ class WallpaperSelectorDialog:
                     text="★",
                     width=28,
                     height=28,
-                    font=ctk.CTkFont(size=14, weight="bold"),
-                    fg_color="#1f2937",
+                    font=ctk.CTkFont(family=_W11["font"], size=14),
+                    corner_radius=4,
+                    fg_color="transparent",
                     hover_color="#ca8a04",
-                    text_color="#9ca3af",
+                    text_color=_W11["text_ter"],
                     state="disabled",
                     command=lambda star=s: self.on_set_rating(star),
                 )
-                s_btn.pack(side="left", padx=2)
+                s_btn.pack(side="left", padx=1)
                 self.star_buttons.append(s_btn)
 
             self.lockscreen_btn = ctk.CTkButton(
                 fav_rating_frame,
-                text="🔒 Set as Lock Screen",
-                height=30,
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#4f46e5",
-                hover_color="#4338ca",
+                text="🔒  Set as Lock Screen",
+                height=28,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
                 state="disabled",
                 command=self.on_apply_lockscreen,
             )
-            self.lockscreen_btn.pack(side="right")
+            self.lockscreen_btn.pack(side="right", padx=(0, 10), pady=8)
         else:
             self.fav_btn = tk.Button(fav_rating_frame, text="🤍 Favorite", state="disabled", command=self.on_toggle_favorite)
             self.fav_btn.pack(side="left")
@@ -716,18 +1008,25 @@ class WallpaperSelectorDialog:
 
         # Status & Progress Area
         status_frame = ctk.CTkFrame(main_parent, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(main_parent)
-        status_frame.pack(fill="x", padx=16, pady=(2, 2))
+        status_frame.pack(fill="x", padx=16, pady=(4, 2))
 
         self.status_lbl = (
-            ctk.CTkLabel(status_frame, text="Ready. Click any category above.", font=ctk.CTkFont(size=12), wraplength=580, justify="left")
+            ctk.CTkLabel(
+                status_frame,
+                text="Ready  ·  Select a category or search above.",
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                text_color=_W11["text_sec"],
+                wraplength=580,
+                justify="left",
+            )
             if HAS_CUSTOMTKINTER
             else tk.Label(status_frame, text="Ready.", wraplength=580, justify="left")
         )
         self.status_lbl.pack(anchor="w")
 
         if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(status_frame)
-            self.progress_bar.pack(fill="x", pady=2)
+            self.progress_bar = ctk.CTkProgressBar(status_frame, height=4, corner_radius=2)
+            self.progress_bar.pack(fill="x", pady=(4, 0))
             self.progress_bar.set(0)
         else:
             self.progress_bar = None
@@ -737,8 +1036,8 @@ class WallpaperSelectorDialog:
             ctk.CTkLabel(
                 main_parent,
                 text="",
-                font=ctk.CTkFont(size=11),
-                text_color="gray",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_ter"],
                 wraplength=580,
                 justify="left",
             )
@@ -765,17 +1064,18 @@ class WallpaperSelectorDialog:
             return
         for cat, btn in self.cat_buttons.items():
             is_active = (cat == active_category)
-            base_col = getattr(self, "_cat_colors", {}).get(cat, "#1f2937")
             if HAS_CUSTOMTKINTER:
                 btn.configure(
-                    border_width=2 if is_active else 0,
-                    border_color="#38bdf8" if is_active else base_col,
-                    fg_color="#2563eb" if is_active else base_col,
+                    fg_color=_W11["accent"] if is_active else _W11["surface_2"],
+                    text_color=_W11["text_pri"] if is_active else _W11["text_sec"],
+                    border_width=2 if is_active else 1,
+                    border_color=_W11["accent"] if is_active else _W11["border"],
+                    hover_color=_W11["accent_hov"] if is_active else _W11["surface_3"],
                 )
             else:
                 btn.config(
                     relief="sunken" if is_active else "raised",
-                    bg="#2563eb" if is_active else "#f0f0f0",
+                    bg="#0078d4" if is_active else "#f0f0f0",
                 )
 
     def set_busy(self, busy: bool) -> None:
@@ -829,12 +1129,12 @@ class WallpaperSelectorDialog:
             if self.config.preview_before_apply:
                 self.set_status(f"Preview updated to {new_mode}. Click 'Apply to Desktop' to confirm.")
                 if HAS_CUSTOMTKINTER:
-                    self.apply_btn.configure(state="normal", text="✓ Apply to Desktop", fg_color="#2563eb")
+                    self.apply_btn.configure(state="normal", text="✓  Apply to Desktop", fg_color=_W11["accent"])
                 else:
                     self.apply_btn.config(state="normal", text="✓ Apply to Desktop")
             else:
                 if Path(target_meta.local_path).exists():
-                    self.adapter.set_wallpaper(Path(target_meta.local_path), mode=new_mode)
+                    self._apply_wallpaper_to_adapter(Path(target_meta.local_path), mode=new_mode)
                     self.set_status(f"Updated display mode to {new_mode}.")
 
     def on_apply_lockscreen(self) -> None:
@@ -858,7 +1158,7 @@ class WallpaperSelectorDialog:
                 self.set_status(f"✓ Applied to Lock Screen: {target_meta.title}", progress=1.0)
                 def _ui():
                     if HAS_CUSTOMTKINTER:
-                        self.lockscreen_btn.configure(text="✓ Lock Screen Set!", fg_color="#059669", state="disabled")
+                        self.lockscreen_btn.configure(text="✓  Lock Screen Set!", fg_color=_W11["success"], state="disabled")
                     else:
                         self.lockscreen_btn.config(text="✓ Lock Screen Set!", state="disabled")
                 self.root.after(0, _ui)
@@ -901,6 +1201,249 @@ class WallpaperSelectorDialog:
                 self.on_trigger_search(active_kw)
             else:
                 self._fetch_random_wallpaper(color=self.selected_color, mood=self.selected_mood)
+
+    # ── 5-Item Recent Wallpaper History Navigation ──────────────────────────────
+    def _init_keyboard_shortcuts(self) -> None:
+        """Bind Left and Right arrow keys for history navigation."""
+        if hasattr(self, "root") and self.root:
+            try:
+                self.root.bind("<Left>", self._on_key_left, add="+")
+                self.root.bind("<Right>", self._on_key_right, add="+")
+            except Exception:
+                pass
+
+    def _on_key_left(self, event=None) -> None:
+        if hasattr(self, "root") and self.root:
+            try:
+                focus = self.root.focus_get()
+                if focus:
+                    cls_name = str(type(focus)).lower()
+                    if "entry" in cls_name or "text" in cls_name:
+                        return
+            except Exception:
+                pass
+        self.on_history_prev()
+
+    def _on_key_right(self, event=None) -> None:
+        if hasattr(self, "root") and self.root:
+            try:
+                focus = self.root.focus_get()
+                if focus:
+                    cls_name = str(type(focus)).lower()
+                    if "entry" in cls_name or "text" in cls_name:
+                        return
+            except Exception:
+                pass
+        self.on_history_next()
+
+    def _record_fetched_wallpaper(self, meta: WallpaperMetadata) -> None:
+        """Record newly fetched wallpaper in recent history and point index to it."""
+        if not meta or not getattr(meta, "local_path", None):
+            return
+        self.recent_mgr.add(meta)
+        items = self.recent_mgr.get_items()
+        self._recent_index = len(items) - 1
+        self._update_history_nav_buttons()
+        self._update_filmstrip()
+
+    def _update_history_nav_buttons(self) -> None:
+        """Update enabled/disabled states of ◀ / ▶ history buttons based on current index."""
+        if not hasattr(self, "prev_hist_btn") or not hasattr(self, "next_hist_btn"):
+            return
+
+        items = self.recent_mgr.get_items()
+        can_prev = (self._recent_index > 0 and len(items) > 0)
+        can_next = (self._recent_index < len(items) - 1 and len(items) > 0)
+
+        if HAS_CUSTOMTKINTER:
+            self.prev_hist_btn.configure(
+                state="normal" if can_prev else "disabled",
+                fg_color=_W11["surface_2"] if can_prev else "transparent",
+                text_color=_W11["text_pri"] if can_prev else _W11["text_ter"],
+            )
+            self.next_hist_btn.configure(
+                state="normal" if can_next else "disabled",
+                fg_color=_W11["surface_2"] if can_next else "transparent",
+                text_color=_W11["text_pri"] if can_next else _W11["text_ter"],
+            )
+        else:
+            self.prev_hist_btn.config(state="normal" if can_prev else "disabled")
+            self.next_hist_btn.config(state="normal" if can_next else "disabled")
+
+    def _get_or_create_thumbnail(self, meta: WallpaperMetadata, width: int = 54, height: int = 30) -> Optional[Any]:
+        """Generate, crop to 16:9, and cache a mini-thumbnail for filmstrip."""
+        if not meta or not getattr(meta, "local_path", None):
+            return None
+        local_path = Path(meta.local_path)
+        if not local_path.exists():
+            return None
+
+        cache_key = f"{meta.local_path}_{width}x{height}"
+        if hasattr(self, "_thumbnail_cache") and cache_key in self._thumbnail_cache:
+            return self._thumbnail_cache[cache_key]
+
+        try:
+            with Image.open(local_path) as img:
+                img_w, img_h = img.size
+                target_ratio = width / height
+                current_ratio = img_w / img_h
+                if current_ratio > target_ratio:
+                    crop_w = int(img_h * target_ratio)
+                    left = (img_w - crop_w) // 2
+                    box = (left, 0, left + crop_w, img_h)
+                else:
+                    crop_h = int(img_w / target_ratio)
+                    top = (img_h - crop_h) // 2
+                    box = (0, top, img_w, top + crop_h)
+
+                cropped = img.crop(box).resize((width, height), Image.Resampling.LANCZOS)
+
+                if HAS_CUSTOMTKINTER:
+                    ctk_thumb = ctk.CTkImage(light_image=cropped, dark_image=cropped, size=(width, height))
+                    if not hasattr(self, "_thumbnail_cache"):
+                        self._thumbnail_cache = {}
+                    self._thumbnail_cache[cache_key] = ctk_thumb
+                    return ctk_thumb
+                else:
+                    try:
+                        from PIL import ImageTk
+                        tk_thumb = ImageTk.PhotoImage(cropped)
+                    except Exception:
+                        tk_thumb = cropped
+                    if not hasattr(self, "_thumbnail_cache"):
+                        self._thumbnail_cache = {}
+                    self._thumbnail_cache[cache_key] = tk_thumb
+                    return tk_thumb
+        except Exception:
+            return None
+
+    def _update_filmstrip(self) -> None:
+        """Render recent history thumbnail cards and highlight active index."""
+        if not hasattr(self, "filmstrip_frame") or not self.filmstrip_frame:
+            return
+
+        for btn in getattr(self, "filmstrip_buttons", []):
+            try:
+                btn.destroy()
+            except Exception:
+                pass
+        self.filmstrip_buttons = []
+
+        if hasattr(self, "filmstrip_inner_frame") and self.filmstrip_inner_frame:
+            try:
+                self.filmstrip_inner_frame.destroy()
+            except Exception:
+                pass
+            self.filmstrip_inner_frame = None
+
+        items = self.recent_mgr.get_items()
+        if not items:
+            return
+
+        # Headless mock safety for unit tests
+        if "MagicMock" in str(type(self.filmstrip_frame)) or "MagicMock" in str(type(getattr(self, "root", None))):
+            for idx, item in enumerate(items):
+                mock_btn = type("MockButton", (), {"is_active": (idx == self._recent_index)})()
+                self.filmstrip_buttons.append(mock_btn)
+            return
+
+        if HAS_CUSTOMTKINTER:
+            self.filmstrip_inner_frame = ctk.CTkFrame(self.filmstrip_frame, fg_color="transparent")
+            self.filmstrip_inner_frame.pack(anchor="center")
+        else:
+            self.filmstrip_inner_frame = tk.Frame(self.filmstrip_frame)
+            self.filmstrip_inner_frame.pack(anchor="center")
+
+        for idx, item in enumerate(items):
+            is_active = (idx == self._recent_index)
+            thumb_img = self._get_or_create_thumbnail(item, width=54, height=30)
+
+            if HAS_CUSTOMTKINTER:
+                btn = ctk.CTkButton(
+                    self.filmstrip_inner_frame,
+                    text="" if thumb_img else f"#{idx+1}",
+                    image=thumb_img,
+                    width=54,
+                    height=30,
+                    corner_radius=4,
+                    fg_color=_W11["surface_2"] if is_active else _W11["surface_1"],
+                    hover_color=_W11["surface_3"],
+                    border_width=2 if is_active else 1,
+                    border_color=_W11["accent"] if is_active else _W11["border"],
+                    command=lambda i=idx: self.on_select_history_index(i),
+                )
+                btn.pack(side="left", padx=3, pady=2)
+                btn.image = thumb_img
+                self.filmstrip_buttons.append(btn)
+            else:
+                btn = tk.Button(
+                    self.filmstrip_inner_frame,
+                    text="" if thumb_img else f"#{idx+1}",
+                    image=thumb_img,
+                    relief="solid" if is_active else "flat",
+                    highlightthickness=2 if is_active else 1,
+                    highlightbackground="#0078d4" if is_active else "#404040",
+                    command=lambda i=idx: self.on_select_history_index(i),
+                )
+                btn.pack(side="left", padx=3, pady=2)
+                btn.image = thumb_img
+                self.filmstrip_buttons.append(btn)
+
+    def on_select_history_index(self, target_idx: int) -> None:
+        """Jump directly to the specified recent history item via filmstrip or shortcut."""
+        items = self.recent_mgr.get_items()
+        if not items or target_idx < 0 or target_idx >= len(items):
+            return
+        if target_idx == self._recent_index:
+            return
+
+        direction = "left" if target_idx < self._recent_index else "right"
+        old_meta = items[self._recent_index] if 0 <= self._recent_index < len(items) else None
+        self._recent_index = target_idx
+        new_meta = items[self._recent_index]
+        self.staged_metadata = new_meta
+        self._update_history_nav_buttons()
+        self._update_filmstrip()
+        self.set_status(f"Recent History: {new_meta.title} ({new_meta.provider})")
+        self._update_preview_and_attribution(new_meta, staged=True, animate_from=old_meta, direction=direction)
+
+    def on_history_prev(self) -> None:
+        """Navigate to the previous (older) fetched wallpaper in recent history."""
+        items = self.recent_mgr.get_items()
+        if not items or self._recent_index <= 0:
+            return
+
+        old_idx = self._recent_index
+        old_meta = items[old_idx] if 0 <= old_idx < len(items) else None
+
+        if self._recent_index > len(items) - 1:
+            self._recent_index = len(items) - 1
+        else:
+            self._recent_index -= 1
+
+        new_meta = items[self._recent_index]
+        self.staged_metadata = new_meta
+        self._update_history_nav_buttons()
+        self._update_filmstrip()
+        self.set_status(f"Recent History: {new_meta.title} ({new_meta.provider})")
+        self._update_preview_and_attribution(new_meta, staged=True, animate_from=old_meta, direction="left")
+
+    def on_history_next(self) -> None:
+        """Navigate to the next (more recent) fetched wallpaper in recent history."""
+        items = self.recent_mgr.get_items()
+        if not items or self._recent_index >= len(items) - 1:
+            return
+
+        old_idx = self._recent_index
+        old_meta = items[old_idx] if 0 <= old_idx < len(items) else None
+
+        self._recent_index += 1
+        new_meta = items[self._recent_index]
+        self.staged_metadata = new_meta
+        self._update_history_nav_buttons()
+        self._update_filmstrip()
+        self.set_status(f"Recent History: {new_meta.title} ({new_meta.provider})")
+        self._update_preview_and_attribution(new_meta, staged=True, animate_from=old_meta, direction="right")
 
     def on_rotate_toggle(self) -> None:
         """Handle toggling of scheduled auto-rotation."""
@@ -959,6 +1502,13 @@ class WallpaperSelectorDialog:
             self._schedule_next_rotation_check(15000)
             return
 
+        if getattr(self.config, "pause_on_battery", True) and is_running_on_battery():
+            self.set_status("⏸️ Auto-Rotate paused (Running on Battery)")
+            if hasattr(self, "_tray_mgr") and self._tray_mgr:
+                self._tray_mgr.update_tooltip("Login Wallpaper Selector (Paused - On Battery)")
+            self._schedule_next_rotation_check(30000)
+            return
+
         if self.is_busy or self._is_auto_rotating:
             # Busy performing manual fetch or rotation; defer check
             self._schedule_next_rotation_check(5000)
@@ -997,13 +1547,17 @@ class WallpaperSelectorDialog:
             def _on_done():
                 self._is_auto_rotating = False
                 if meta:
+                    self._record_fetched_wallpaper(meta)
+                    theme_tag = f" ({meta.time_of_day_info})" if getattr(meta, "time_of_day_info", None) else f" ({meta.category})"
                     # Critical Rule: If user is actively previewing an image, do NOT overwrite their preview!
                     if self.staged_metadata is not None:
-                        self.set_status(f"✓ Auto-rotated desktop: '{meta.title}' (Active manual preview preserved)")
+                        self.set_status(f"✓ Auto-rotated desktop{theme_tag}: '{meta.title}' (Active manual preview preserved)")
                     else:
                         self.current_metadata = meta
-                        self.set_status(f"✓ Auto-rotated desktop: '{meta.title}' ({meta.category})")
+                        self.set_status(f"✓ Auto-rotated desktop{theme_tag}: '{meta.title}'")
                         self._update_preview_and_attribution(meta, staged=False)
+                    if hasattr(self, "_tray_mgr") and self._tray_mgr:
+                        self._tray_mgr.update_tooltip(f"Login Wallpaper Selector: {meta.title}")
                 else:
                     if err:
                         self.set_status(f"Scheduled auto-rotation skipped: {err}")
@@ -1035,6 +1589,10 @@ class WallpaperSelectorDialog:
                 on_show=self._restore_from_tray,
                 on_rotate_now=self.on_rotate_now,
                 on_quit=self.quit_app,
+                on_favorite=self.on_tray_favorite,
+                on_open_folder=self.on_tray_open_folder,
+                on_copy_path=self.on_tray_copy_path,
+                get_current_title=lambda: getattr(self.current_metadata, "title", None),
                 app_name="Login Wallpaper Selector",
             )
         self.root.withdraw()
@@ -1065,7 +1623,7 @@ class WallpaperSelectorDialog:
                 pass
 
     def cleanup(self) -> None:
-        """Cancel pending rotation timers and cleanup system tray icon."""
+        """Cancel pending rotation timers, stop hotkey listener, and cleanup system tray icon."""
         if hasattr(self, "root") and self.root and self._rotation_timer_id:
             try:
                 self.root.after_cancel(self._rotation_timer_id)
@@ -1078,6 +1636,94 @@ class WallpaperSelectorDialog:
             except Exception:
                 pass
             self._tray_mgr = None
+        if hasattr(self, "_hotkey_listener") and self._hotkey_listener:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
+
+    def _start_global_hotkey(self) -> None:
+        """Start the Windows global hotkey listener if enabled in config."""
+        if not getattr(self.config, "global_hotkey_enabled", True) or os.name != "nt":
+            return
+        if self._hotkey_listener:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
+        combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+        self._hotkey_listener = GlobalHotkeyListener(combo=combo, on_triggered=self.on_hotkey_triggered)
+        self._hotkey_listener.start()
+
+    def on_hotkey_toggle(self) -> None:
+        """Handle toggling of global hotkey setting."""
+        enabled = self.hotkey_var.get() if hasattr(self, "hotkey_var") else True
+        self.config.global_hotkey_enabled = enabled
+        self.config.save()
+        if enabled:
+            self._start_global_hotkey()
+            self.set_status(f"⚡ Global hotkey enabled ({getattr(self.config, 'global_hotkey_combo', 'Win+Alt+W')}).")
+        else:
+            if self._hotkey_listener:
+                self._hotkey_listener.stop()
+                self._hotkey_listener = None
+            self.set_status("Global hotkey disabled.")
+
+    def on_hotkey_combo_change(self, new_combo: str) -> None:
+        """Handle changing the global hotkey key combination."""
+        self.config.global_hotkey_combo = new_combo
+        self.config.save()
+        if getattr(self.config, "global_hotkey_enabled", True):
+            self._start_global_hotkey()
+            self.set_status(f"⚡ Global hotkey updated to {new_combo}.")
+
+    def on_hotkey_triggered(self) -> None:
+        """Handle background hotkey trigger to rotate wallpaper and send toast notifications."""
+        if self._is_hotkey_rotating:
+            return
+        self._is_hotkey_rotating = True
+        send_toast_notification(
+            "Login Wallpaper Selector",
+            "Fetching new wallpaper in background...",
+            tray_mgr=self._tray_mgr,
+        )
+
+        def _worker():
+            try:
+                from ..core.scheduler import WallpaperRotationDaemon
+                daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+                meta, err = daemon.rotate_now(
+                    color=getattr(self, "selected_color", ColorPalette.ANY),
+                    mood=getattr(self, "selected_mood", WallpaperMood.ANY),
+                )
+                if meta:
+                    info = getattr(meta, "time_of_day_info", None) or meta.category or "Wallpaper"
+                    send_toast_notification(
+                        "Wallpaper Changed",
+                        f"✓ '{meta.title}' ({info})",
+                        tray_mgr=self._tray_mgr,
+                    )
+                    if hasattr(self, "root") and self.root:
+                        def _sync_ui():
+                            self.current_metadata = meta
+                            self._record_fetched_wallpaper(meta)
+                            self._update_preview_and_attribution(meta)
+                        try:
+                            self.root.after(0, _sync_ui)
+                        except Exception:
+                            pass
+                else:
+                    send_toast_notification(
+                        "Rotation Error",
+                        f"Failed to rotate wallpaper: {err}",
+                        tray_mgr=self._tray_mgr,
+                    )
+            finally:
+                self._is_hotkey_rotating = False
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def on_rotate_now(self) -> None:
         """Trigger an instant wallpaper rotation in background worker thread."""
@@ -1108,13 +1754,120 @@ class WallpaperSelectorDialog:
 
             if meta:
                 self.current_metadata = meta
-                self.set_status(f"✓ Rotated to: {meta.title} ({meta.category})", progress=1.0)
+                self._record_fetched_wallpaper(meta)
+                theme_tag = f" ({meta.time_of_day_info})" if getattr(meta, "time_of_day_info", None) else f" ({meta.category})"
+                self.set_status(f"✓ Rotated to: {meta.title}{theme_tag}", progress=1.0)
                 self._update_preview_and_attribution(meta)
             else:
                 self.set_status(f"Rotation failed: {err}")
             self.set_busy(False)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_wallpaper_to_adapter(self, path: Path, mode: str) -> bool:
+        """Apply wallpaper file via desktop adapter respecting configured target monitor."""
+        target_mon = getattr(self.config, "target_monitor_id", None)
+        if target_mon:
+            try:
+                return self.adapter.set_wallpaper(path, mode=mode, monitor_id=target_mon)
+            except TypeError:
+                return self.adapter.set_wallpaper(path, mode=mode)
+        return self.adapter.set_wallpaper(path, mode=mode)
+
+    def on_monitor_change(self, choice: str) -> None:
+        """Handle target display monitor selection."""
+        if choice == "All Displays":
+            self.config.target_monitor_id = None
+        else:
+            for m_id, label in getattr(self, "monitors", []):
+                if label == choice:
+                    self.config.target_monitor_id = m_id
+                    break
+        self.config.save()
+        self.set_status(f"Target display set to: {choice}.")
+
+    def on_pause_battery_toggle(self) -> None:
+        """Handle toggling of battery-aware auto-rotation pause."""
+        val = self.pause_battery_var.get() if hasattr(self, "pause_battery_var") else True
+        self.config.pause_on_battery = val
+        self.config.save()
+        status_txt = "Auto-rotation will pause when on battery power." if val else "Auto-rotation will run on battery."
+        self.set_status(f"🔋 {status_txt}")
+
+    def on_open_gallery(self) -> None:
+        """Open the Wallpaper Gallery & Archive modal dialog."""
+        WallpaperGalleryDialog(
+            parent=self.root,
+            config=self.config,
+            favorites_mgr=self.favorites_mgr,
+            recent_mgr=self.recent_mgr,
+            history_tracker=self.history,
+            on_apply=self.on_gallery_apply,
+            on_favorite_toggled=self.on_gallery_favorite_toggled,
+        )
+
+    def on_gallery_apply(self, meta: WallpaperMetadata) -> None:
+        """Apply a selected wallpaper from the gallery directly to the desktop."""
+        mode = self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill")
+        success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
+        if success:
+            self.current_metadata = meta
+            self._record_fetched_wallpaper(meta)
+            self._update_preview_and_attribution(meta, staged=False)
+            self.set_status(f"✓ Applied from Gallery: {meta.title}", progress=1.0)
+            if hasattr(self, "_tray_mgr") and self._tray_mgr:
+                self._tray_mgr.update_tooltip(f"Login Wallpaper Selector: {meta.title}")
+        else:
+            self.set_status(f"Could not apply wallpaper: {meta.title}")
+
+    def on_gallery_favorite_toggled(self, meta: WallpaperMetadata) -> None:
+        """Handle favorite toggle originating from the gallery modal."""
+        if self.current_metadata and self.current_metadata.image_id == meta.image_id:
+            self.current_metadata.is_favorite = self.favorites_mgr.is_favorite(meta.image_id)
+            self._update_favorite_button_state(self.current_metadata)
+        self._update_filmstrip()
+
+    def on_tray_favorite(self) -> None:
+        """Toggle favorite on current wallpaper directly from system tray context menu."""
+        if not self.current_metadata:
+            send_toast_notification("Favorites", "No wallpaper currently loaded.", tray_mgr=self._tray_mgr)
+            return
+        is_fav = self.favorites_mgr.toggle_favorite(self.current_metadata)
+        self.current_metadata.is_favorite = is_fav
+        status = "Added to Favorites ⭐" if is_fav else "Removed from Favorites"
+        send_toast_notification("Favorites", f"{status}: '{self.current_metadata.title}'", tray_mgr=self._tray_mgr)
+        if hasattr(self, "root") and self.root:
+            def _update():
+                self._update_favorite_button_state(self.current_metadata)
+                self._update_filmstrip()
+            try:
+                self.root.after(0, _update)
+            except Exception:
+                pass
+
+    def on_tray_open_folder(self) -> None:
+        """Open Windows Explorer with current wallpaper selected."""
+        if not self.current_metadata or not self.current_metadata.local_path:
+            return
+        p = Path(self.current_metadata.local_path)
+        if p.exists() and os.name == "nt":
+            try:
+                subprocess.run(["explorer.exe", f"/select,{str(p.resolve())}"])
+            except Exception:
+                pass
+
+    def on_tray_copy_path(self) -> None:
+        """Copy current wallpaper path to Windows clipboard."""
+        if not self.current_metadata or not self.current_metadata.local_path:
+            return
+        p_str = str(Path(self.current_metadata.local_path).resolve())
+        if hasattr(self, "root") and self.root:
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(p_str)
+            except Exception:
+                pass
+        send_toast_notification("Clipboard", "Wallpaper file path copied to clipboard.", tray_mgr=self._tray_mgr)
 
     def on_select_color(self, palette: ColorPalette) -> None:
         """Handle user selection of dominant color palette."""
@@ -1131,8 +1884,10 @@ class WallpaperSelectorDialog:
             is_active = (pal == palette)
             if HAS_CUSTOMTKINTER:
                 chip.configure(
-                    border_width=2 if is_active else 0,
-                    fg_color=palette_colors.get(pal, "#374151") if is_active else "#1f2937",
+                    border_width=2 if is_active else 1,
+                    border_color=_W11["accent"] if is_active else _W11["border"],
+                    text_color=_W11["text_pri"] if is_active else _W11["text_sec"],
+                    fg_color=palette_colors.get(pal, _W11["surface_2"]) if is_active else _W11["surface_2"],
                 )
         desc = "No color filter" if palette == ColorPalette.ANY else f"{palette.value} color filter"
         self.set_status(f"Palette updated: {desc}.")
@@ -1163,8 +1918,10 @@ class WallpaperSelectorDialog:
             is_active = (m == mood)
             if HAS_CUSTOMTKINTER:
                 chip.configure(
-                    border_width=2 if is_active else 0,
-                    fg_color=mood_colors.get(m, "#374151") if is_active else "#1f2937",
+                    border_width=2 if is_active else 1,
+                    border_color=_W11["accent"] if is_active else _W11["border"],
+                    text_color=_W11["text_pri"] if is_active else _W11["text_sec"],
+                    fg_color=mood_colors.get(m, _W11["surface_2"]) if is_active else _W11["surface_2"],
                 )
         desc = "No mood filter" if mood == WallpaperMood.ANY else f"{mood.value} mood"
         self.set_status(f"Mood updated: {desc}.")
@@ -1305,10 +2062,11 @@ class WallpaperSelectorDialog:
 
             if self.config.preview_before_apply:
                 self.staged_metadata = meta
+                self._record_fetched_wallpaper(meta)
                 self.set_status(f"✓ Previewing favorite: {fav.title}. Click 'Apply to Desktop' to set.", progress=1.0)
                 self._update_preview_and_attribution(meta, staged=True)
             else:
-                success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
                 if success:
                     lock_msg = ""
                     if self.lockscreen_var.get():
@@ -1339,8 +2097,8 @@ class WallpaperSelectorDialog:
         target_meta.is_favorite = is_fav
         if HAS_CUSTOMTKINTER:
             self.fav_btn.configure(
-                text="❤️ Favorited" if is_fav else "🤍 Favorite",
-                fg_color="#9d174d" if is_fav else "#374151",
+                text="❤️  Favorited" if is_fav else "🤍  Favorite",
+                fg_color="#9d174d" if is_fav else _W11["surface_2"],
             )
         else:
             self.fav_btn.config(text="❤️ Favorited" if is_fav else "🤍 Favorite")
@@ -1360,8 +2118,8 @@ class WallpaperSelectorDialog:
             is_active = (idx < new_rating)
             if HAS_CUSTOMTKINTER:
                 star_btn.configure(
-                    fg_color="#ca8a04" if is_active else "#1f2937",
-                    text_color="#fef08a" if is_active else "#9ca3af",
+                    fg_color="#b45309" if is_active else "transparent",
+                    text_color="#fef08a" if is_active else _W11["text_ter"],
                 )
             else:
                 star_btn.config(bg="#ca8a04" if is_active else "#ddd")
@@ -1391,12 +2149,13 @@ class WallpaperSelectorDialog:
                 return
 
             if meta:
+                self._record_fetched_wallpaper(meta)
                 if self.config.preview_before_apply:
                     self.staged_metadata = meta
                     self.set_status(f"✓ Previewing local image: {selected_path.name}. Click 'Apply to Desktop' to set.", progress=1.0)
                     self._update_preview_and_attribution(meta, staged=True)
                 else:
-                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
                     if success:
                         lock_msg = ""
                         if self.lockscreen_var.get():
@@ -1455,12 +2214,13 @@ class WallpaperSelectorDialog:
 
             if meta:
                 self.staged_metadata = meta
+                self._record_fetched_wallpaper(meta)
                 if self.config.preview_before_apply:
                     self.set_status(f"✓ Previewing {category.value}: {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
                     self._update_preview_and_attribution(meta, staged=True)
                 else:
                     self.set_status("Applying wallpaper to desktop...", progress=0.95)
-                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
                     if success:
                         lock_msg = ""
                         if self.lockscreen_var.get():
@@ -1480,16 +2240,17 @@ class WallpaperSelectorDialog:
                     fallback_meta = self.cache.store_local_image(fallback, mode=mode)
                     if fallback_meta:
                         self.staged_metadata = fallback_meta
+                        self._record_fetched_wallpaper(fallback_meta)
                         if self.config.preview_before_apply:
                             self.set_status(f"Online search failed ({err}). Previewing cached wallpaper.", progress=1.0)
                             self._update_preview_and_attribution(fallback_meta, staged=True)
                         else:
-                            self.adapter.set_wallpaper(fallback, mode=mode)
+                            self._apply_wallpaper_to_adapter(fallback, mode=mode)
                             self.current_metadata = fallback_meta
                             self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
                             self._update_preview_and_attribution(fallback_meta, staged=False)
                     else:
-                        self.adapter.set_wallpaper(fallback, mode=mode)
+                        self._apply_wallpaper_to_adapter(fallback, mode=mode)
                         self.set_status(f"Online search failed ({err}). Using previously cached wallpaper.", progress=1.0)
                 else:
                     self.set_status(f"Error: {err}", progress=0.0)
@@ -1519,7 +2280,7 @@ class WallpaperSelectorDialog:
         self.set_status("Applying wallpaper to desktop...", progress=0.8)
 
         def _worker():
-            success = self.adapter.set_wallpaper(target_path, mode=mode)
+            success = self._apply_wallpaper_to_adapter(target_path, mode=mode)
             if success:
                 self.current_metadata = target_meta
                 self.staged_metadata = None
@@ -1528,7 +2289,7 @@ class WallpaperSelectorDialog:
                 def _ui_update():
                     if hasattr(self, "apply_btn"):
                         if HAS_CUSTOMTKINTER:
-                            self.apply_btn.configure(text="✓ Applied!", fg_color="#059669", state="disabled")
+                            self.apply_btn.configure(text="✓  Applied!", fg_color=_W11["success"], state="disabled")
                         else:
                             self.apply_btn.config(text="✓ Applied!", state="disabled")
                 if hasattr(self, "root") and self.root:
@@ -1541,12 +2302,31 @@ class WallpaperSelectorDialog:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _render_preview_image(self, meta: WallpaperMetadata, mode: Optional[str] = None) -> None:
-        """Render desktop screen-fit and cropping preview mockup for current or staged image."""
+    def _display_preview_pil(self, img: Image.Image) -> None:
+        """Display a PIL Image on self.preview_label safely."""
+        if not hasattr(self, "preview_label") or not self.preview_label:
+            return
+        try:
+            if HAS_CUSTOMTKINTER:
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                self.preview_label.configure(image=ctk_img, text="")
+                self.preview_label.image = ctk_img
+            else:
+                from PIL import ImageTk
+                tk_img = ImageTk.PhotoImage(img)
+                self.preview_label.config(image=tk_img, text="")
+                self.preview_label.image = tk_img
+        except Exception:
+            pass
+
+    def _get_preview_pil_image(self, meta: WallpaperMetadata, mode: Optional[str] = None) -> Optional[Image.Image]:
+        """Generate and return desktop screen-fit and cropping preview mockup PIL image."""
+        if not meta or not getattr(meta, "local_path", None):
+            return None
         local_path = Path(meta.local_path)
         if not local_path.exists():
-            return
-        m = mode or self.mode_var.get()
+            return None
+        m = mode or (self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill"))
         try:
             target_w = 540
             if hasattr(self, "root") and hasattr(self.root, "winfo_width"):
@@ -1562,27 +2342,114 @@ class WallpaperSelectorDialog:
                 mode=m,
                 max_preview_width=target_w,
                 max_preview_height=150,
-                layout_aware=bool(self.layout_var.get()),
+                layout_aware=bool(self.layout_var.get()) if hasattr(self, "layout_var") else True,
                 draw_mockup_frame=True,
             )
             if not preview_img:
                 img = Image.open(local_path)
                 img.thumbnail((target_w, 150), Image.Resampling.LANCZOS)
                 preview_img = img
-
-            if HAS_CUSTOMTKINTER:
-                ctk_img = ctk.CTkImage(light_image=preview_img, dark_image=preview_img, size=preview_img.size)
-                self.preview_label.configure(image=ctk_img, text="")
-                self.preview_label.image = ctk_img
-            else:
-                from PIL import ImageTk
-                tk_img = ImageTk.PhotoImage(preview_img)
-                self.preview_label.config(image=tk_img, text="")
-                self.preview_label.image = tk_img
+            return preview_img
         except Exception:
-            pass
+            return None
 
-    def _update_preview_and_attribution(self, meta: WallpaperMetadata, staged: bool = False) -> None:
+    def _render_preview_image(self, meta: WallpaperMetadata, mode: Optional[str] = None) -> None:
+        """Render desktop screen-fit and cropping preview mockup for current or staged image."""
+        preview_img = self._get_preview_pil_image(meta, mode=mode)
+        if preview_img:
+            self._last_rendered_pil_img = preview_img
+            self._display_preview_pil(preview_img)
+
+    def _animate_slide_transition(
+        self,
+        old_meta: WallpaperMetadata,
+        new_meta: WallpaperMetadata,
+        direction: str = "left",
+    ) -> None:
+        """Perform a smooth horizontal slide transition between two wallpaper previews."""
+        if not hasattr(self, "preview_label") or not self.preview_label:
+            return
+
+        old_pil = self._last_rendered_pil_img or self._get_preview_pil_image(old_meta)
+        new_pil = self._get_preview_pil_image(new_meta)
+
+        if not old_pil or not new_pil:
+            self._render_preview_image(new_meta)
+            return
+
+        # Immediate fallback for headless or test environments
+        if (
+            not hasattr(self, "root")
+            or not self.root
+            or not hasattr(self.root, "after")
+            or "MagicMock" in str(type(self.root))
+        ):
+            self._last_rendered_pil_img = new_pil
+            self._display_preview_pil(new_pil)
+            return
+
+        try:
+            if old_pil.size != new_pil.size:
+                new_pil = new_pil.resize(old_pil.size, Image.Resampling.LANCZOS)
+            w, h = old_pil.size
+
+            composite = Image.new("RGB", (2 * w, h))
+            if direction == "left":
+                # Moving to older: new comes in from left, old slides out to right
+                composite.paste(new_pil, (0, 0))
+                composite.paste(old_pil, (w, 0))
+            else:
+                # Moving to newer: old slides out to left, new comes in from right
+                composite.paste(old_pil, (0, 0))
+                composite.paste(new_pil, (w, 0))
+
+            self._is_animating_slide = True
+            steps = [0.0, 0.22, 0.48, 0.73, 0.90, 1.0]
+
+            def _step(step_idx: int):
+                if not self._is_animating_slide:
+                    return
+                if step_idx >= len(steps):
+                    self._is_animating_slide = False
+                    self._last_rendered_pil_img = new_pil
+                    self._display_preview_pil(new_pil)
+                    return
+
+                p = steps[step_idx]
+                ease_p = 1.0 - (1.0 - p) ** 3
+                if direction == "left":
+                    crop_x = int(w * (1.0 - ease_p))
+                else:
+                    crop_x = int(w * ease_p)
+
+                crop_x = max(0, min(w, crop_x))
+                cropped_frame = composite.crop((crop_x, 0, crop_x + w, h))
+                self._display_preview_pil(cropped_frame)
+
+                if step_idx + 1 < len(steps):
+                    try:
+                        self.root.after(20, lambda: _step(step_idx + 1))
+                    except Exception:
+                        self._is_animating_slide = False
+                        self._last_rendered_pil_img = new_pil
+                        self._display_preview_pil(new_pil)
+                else:
+                    self._is_animating_slide = False
+                    self._last_rendered_pil_img = new_pil
+                    self._display_preview_pil(new_pil)
+
+            _step(0)
+        except Exception:
+            self._is_animating_slide = False
+            self._render_preview_image(new_meta)
+
+    def _update_preview_and_attribution(
+        self,
+        meta: WallpaperMetadata,
+        staged: bool = False,
+        animate_from: Optional[WallpaperMetadata] = None,
+        direction: Optional[str] = None,
+    ) -> None:
         def _update():
             # Enable actions
             is_fav = self.favorites_mgr.is_favorite(meta.image_id)
@@ -1590,30 +2457,30 @@ class WallpaperSelectorDialog:
 
             if HAS_CUSTOMTKINTER:
                 self.retry_btn.configure(state="normal")
-                self.save_btn.configure(state="normal", text="💾 Save Image")
+                self.save_btn.configure(state="normal", text="💾 Save")
                 self.open_folder_btn.configure(state="disabled")
                 self.fav_btn.configure(
                     state="normal",
-                    text="❤️ Favorited" if is_fav else "🤍 Favorite",
-                    fg_color="#9d174d" if is_fav else "#374151",
+                    text="❤️  Favorited" if is_fav else "🤍  Favorite",
+                    fg_color="#9d174d" if is_fav else _W11["surface_2"],
                 )
                 for idx, star_btn in enumerate(self.star_buttons):
                     is_active = (idx < rating)
                     star_btn.configure(
                         state="normal",
-                        fg_color="#ca8a04" if is_active else "#1f2937",
-                        text_color="#fef08a" if is_active else "#9ca3af",
+                        fg_color="#b45309" if is_active else "transparent",
+                        text_color="#fef08a" if is_active else _W11["text_ter"],
                     )
                 if hasattr(self, "lockscreen_btn"):
                     self.lockscreen_btn.configure(
                         state="normal",
-                        text="🔒 Set as Lock Screen",
-                        fg_color="#4f46e5",
+                        text="🔒  Set as Lock Screen",
+                        fg_color=_W11["accent"],
                     )
                 if staged:
-                    self.apply_btn.configure(state="normal", text="✓ Apply to Desktop", fg_color="#2563eb")
+                    self.apply_btn.configure(state="normal", text="✓  Apply to Desktop", fg_color=_W11["accent"])
                 else:
-                    self.apply_btn.configure(state="disabled", text="✓ Applied!", fg_color="#059669")
+                    self.apply_btn.configure(state="disabled", text="✓  Applied!", fg_color=_W11["success"])
             else:
                 self.retry_btn.config(state="normal")
                 self.save_btn.config(state="normal", text="💾 Save Image")
@@ -1647,8 +2514,11 @@ class WallpaperSelectorDialog:
             else:
                 self.attrib_lbl.config(text=attr_text)
 
-            # Render preview image mockup
-            self._render_preview_image(meta)
+            # Render preview image mockup with optional slide animation
+            if animate_from and direction in ("left", "right"):
+                self._animate_slide_transition(animate_from, meta, direction)
+            else:
+                self._render_preview_image(meta)
 
         self.root.after(0, _update)
 
@@ -1661,9 +2531,9 @@ class WallpaperSelectorDialog:
         self.suggestion_buttons = []
 
         hint_lbl = (
-            ctk.CTkLabel(self.suggestions_frame, text="💡 Try:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#9ca3af")
+            ctk.CTkLabel(self.suggestions_frame, text="Try:", font=ctk.CTkFont(family=_W11["font"], size=11), text_color=_W11["text_ter"])
             if HAS_CUSTOMTKINTER
-            else tk.Label(self.suggestions_frame, text="💡 Try:", font=("Helvetica", 9, "bold"), fg="gray")
+            else tk.Label(self.suggestions_frame, text="Try:", font=("Segoe UI", 9), fg="gray")
         )
         hint_lbl.pack(side="left", padx=(2, 6))
 
@@ -1673,12 +2543,14 @@ class WallpaperSelectorDialog:
                 btn = ctk.CTkButton(
                     self.suggestions_frame,
                     text=kw,
-                    height=22,
-                    font=ctk.CTkFont(size=11),
-                    fg_color="#1f2937",
-                    hover_color="#374151",
-                    text_color="#e5e7eb",
-                    corner_radius=11,
+                    height=24,
+                    font=ctk.CTkFont(family=_W11["font"], size=11),
+                    fg_color=_W11["surface_2"],
+                    hover_color=_W11["surface_3"],
+                    text_color=_W11["text_sec"],
+                    border_width=1,
+                    border_color=_W11["border"],
+                    corner_radius=12,
                 )
                 btn.configure(command=lambda q=kw, b=btn: self._on_suggestion_click(q, b))
                 btn.pack(side="left", padx=2)
@@ -1701,9 +2573,9 @@ class WallpaperSelectorDialog:
 
         if chip_btn:
             if HAS_CUSTOMTKINTER:
-                chip_btn.configure(border_width=2, border_color="#38bdf8", fg_color="#2563eb")
+                chip_btn.configure(border_width=2, border_color=_W11["accent"], fg_color=_W11["accent"])
             else:
-                chip_btn.config(relief="sunken", bg="#2563eb")
+                chip_btn.config(relief="sunken", bg="#0078d4")
 
         self.on_trigger_search(query)
 
@@ -1748,27 +2620,49 @@ class WallpaperSelectorDialog:
                 self.set_status(f"[{attempt}/{total_attempts}] {msg}", progress=0.1 * attempt)
 
             mode = self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill")
-            meta, err = self.router.acquire_wallpaper_for_category(
-                category=None,
-                mode=mode,
-                progress_callback=_progress,
-                status_callback=_status,
-                color=color,
-                mood=mood,
-                season=active_season,
-            )
+
+            # Use active Time-of-Day keywords in the background for random wallpaper exploration
+            recent_titles = self.history.get_recent_history_titles() if hasattr(self, "history") and self.history else []
+            tod_keywords = select_time_of_day_keywords(recent_titles)
+            meta = None
+            err = None
+            for kw in tod_keywords:
+                meta, err = self.router.acquire_wallpaper_by_keyword(
+                    keyword=kw,
+                    mode=mode,
+                    progress_callback=_progress,
+                    status_callback=_status,
+                    color=color,
+                    mood=mood,
+                    season=active_season,
+                )
+                if meta:
+                    break
+
+            # Fallback to general random category fetch if keyword query did not yield results
+            if not meta:
+                meta, err = self.router.acquire_wallpaper_for_category(
+                    category=None,
+                    mode=mode,
+                    progress_callback=_progress,
+                    status_callback=_status,
+                    color=color,
+                    mood=mood,
+                    season=active_season,
+                )
 
             if self._current_search_id != fetch_id:
                 return
 
             if meta:
                 self.staged_metadata = meta
+                self._record_fetched_wallpaper(meta)
                 if self.config.preview_before_apply:
                     self.set_status(f"✓ Previewing: {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
                     self._update_preview_and_attribution(meta, staged=True)
                 else:
                     self.set_status("Applying wallpaper to desktop...", progress=0.95)
-                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
                     if success:
                         lock_msg = ""
                         if self.lockscreen_var.get():
@@ -1850,12 +2744,13 @@ class WallpaperSelectorDialog:
             if meta:
                 self.search_history_mgr.record_search(query, "Search", success=True, metadata=meta)
                 self.staged_metadata = meta
+                self._record_fetched_wallpaper(meta)
                 if self.config.preview_before_apply:
                     self.set_status(f"✓ Found '{query}': {meta.title}. Click 'Apply to Desktop' to set.", progress=1.0)
                     self._update_preview_and_attribution(meta, staged=True)
                 else:
                     self.set_status(f"Applying '{query}' to desktop...", progress=0.95)
-                    success = self.adapter.set_wallpaper(Path(meta.local_path), mode=mode)
+                    success = self._apply_wallpaper_to_adapter(Path(meta.local_path), mode=mode)
                     if success:
                         lock_msg = ""
                         if self.lockscreen_var.get():

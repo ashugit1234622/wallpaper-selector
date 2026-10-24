@@ -66,9 +66,10 @@ def test_check_for_updates_ignores_current_or_older_release():
         "html_url": "https://github.com/ashugit1234622/wallpaper-selector/releases/tag/v1.0.0",
     }
 
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=mock_resp), \
+         patch("login_wallpaper_selector.core.updater.check_git_remote_update", return_value=None):
         res = check_for_updates(cfg, force=True)
-        # v1.0.0 is equal to current version, so no update available
+        # v1.0.0 is older than current version, so no update available
         assert res.update_available is False
 
 
@@ -77,15 +78,54 @@ def test_check_for_updates_handles_404_gracefully():
     mock_resp = MagicMock()
     mock_resp.status_code = 404
 
-    with patch("httpx.Client.get", return_value=mock_resp):
+    with patch("httpx.Client.get", return_value=mock_resp), \
+         patch("login_wallpaper_selector.core.updater.check_git_remote_update", return_value=None):
         res = check_for_updates(cfg, force=True)
         assert res.update_available is False
-        assert "No releases found" in (res.error or "")
+
+
+def test_check_for_updates_hybrid_git_commits():
+    cfg = AppConfig.load()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+
+    with patch("httpx.Client.get", return_value=mock_resp), \
+         patch("login_wallpaper_selector.core.updater.check_git_remote_update", return_value=(True, "1111111", "2222222")):
+        res = check_for_updates(cfg, force=True)
+        assert res.update_available is True
+        assert "2222222" in res.latest_version
+        assert "2222222" in res.release_notes
+        assert res.is_git_clone is True
+
+
+def test_check_git_remote_update_detection(tmp_path):
+    from login_wallpaper_selector.core.updater import check_git_remote_update
+
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+
+    def _mock_run(cmd, **kwargs):
+        mock = MagicMock()
+        mock.returncode = 0
+        if "rev-parse" in cmd:
+            mock.stdout = "aaa111122223333444455556666777788889999\n"
+        elif "ls-remote" in cmd:
+            mock.stdout = "bbb111122223333444455556666777788889999\trefs/heads/master\n"
+        return mock
+
+    with patch("subprocess.run", side_effect=_mock_run):
+        res = check_git_remote_update(tmp_path)
+        assert res is not None
+        has_diff, local_h, remote_h = res
+        assert has_diff is True
+        assert local_h == "aaa1111"
+        assert remote_h == "bbb1111"
 
 
 def test_check_for_updates_throttles_automated_checks():
+    from datetime import datetime, timezone
     cfg = AppConfig.load()
-    cfg.last_update_check_timestamp = "2026-10-23T15:00:00Z"
+    cfg.last_update_check_timestamp = datetime.now(timezone.utc).isoformat()
     cfg.update_check_interval_hours = 4
 
     # Non-forced check should be throttled

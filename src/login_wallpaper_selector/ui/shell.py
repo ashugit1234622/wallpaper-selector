@@ -22,6 +22,22 @@ from .dialog import WallpaperSelectorDialog
 from .update_dialog import UpdateModalDialog
 from ..tools.download_organizer.ui import DownloadOrganizerView
 
+# ── Windows 11 Fluent Design tokens ──────────────────────────────────────────
+_W11 = {
+    "surface_0":  "#202020",   # App background (Mica-like)
+    "surface_1":  "#2b2b2b",   # Card / panel fill
+    "surface_2":  "#333333",   # Elevated rows
+    "surface_3":  "#3c3c3c",   # Hover
+    "sidebar_bg": "#1c1c1c",   # Navigation rail
+    "accent":     "#0078d4",   # Windows accent blue
+    "accent_hov": "#1084d8",
+    "text_pri":   "#f3f3f3",
+    "text_sec":   "#9d9d9d",
+    "text_ter":   "#6b6b6b",
+    "border":     "#404040",
+    "font":       "Segoe UI",
+}
+
 
 class AppShell:
     """Main application window providing persistent navigation across independent tools."""
@@ -75,144 +91,166 @@ class AppShell:
 
     def _build_shell(self) -> None:
         # Main layout: Left sidebar + Right content area
-        self.main_container = ctk.CTkFrame(self.root, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.root)
+        self.main_container = (
+            ctk.CTkFrame(self.root, fg_color=_W11["surface_0"])
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self.root)
+        )
         self.main_container.pack(fill="both", expand=True)
 
-        # 1. Left Navigation Sidebar
+        # ── 1. Left Navigation Sidebar ────────────────────────────────────────
         self.sidebar = (
-            ctk.CTkFrame(self.main_container, width=200, corner_radius=0, fg_color="#0f172a")
+            ctk.CTkFrame(self.main_container, width=220, corner_radius=0, fg_color=_W11["sidebar_bg"])
             if HAS_CUSTOMTKINTER
-            else tk.Frame(self.main_container, width=180, bg="#1e293b")
+            else tk.Frame(self.main_container, width=200, bg="#1c1c1c")
         )
         self.sidebar.pack(side="left", fill="y", padx=0, pady=0)
         self.sidebar.pack_propagate(False)
 
-        # Sidebar Branding
-        brand_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.sidebar)
-        brand_frame.pack(fill="x", padx=12, pady=(16, 20))
+        # ── Brand / logo section ──────────────────────────────────────────────
+        brand_frame = (
+            ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self.sidebar, bg="#1c1c1c")
+        )
+        brand_frame.pack(fill="x", padx=16, pady=(20, 8))
 
-        app_title = (
+        if HAS_CUSTOMTKINTER:
             ctk.CTkLabel(
                 brand_frame,
-                text="⚡ Utility Suite",
-                font=ctk.CTkFont(size=18, weight="bold"),
-                text_color="#f8fafc",
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Label(brand_frame, text="Utility Suite", font=("Helvetica", 14, "bold"))
-        )
-        app_title.pack(anchor="w")
-
-        app_sub = (
+                text="🖼  Desktop Suite",
+                font=ctk.CTkFont(family=_W11["font"], size=15, weight="bold"),
+                text_color=_W11["text_pri"],
+            ).pack(anchor="w")
             ctk.CTkLabel(
                 brand_frame,
-                text="Desktop Tools",
-                font=ctk.CTkFont(size=11),
-                text_color="#64748b",
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Label(brand_frame, text="Desktop Tools")
-        )
-        app_sub.pack(anchor="w")
+                text="v1.5.0",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_ter"],
+            ).pack(anchor="w", pady=(1, 0))
+        else:
+            tk.Label(brand_frame, text="Desktop Suite", font=("Segoe UI", 12, "bold"), bg="#1c1c1c", fg="#f3f3f3").pack(anchor="w")
 
-        # Sidebar Navigation Buttons
-        nav_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.sidebar)
+        # Separator line
+        if HAS_CUSTOMTKINTER:
+            ctk.CTkFrame(self.sidebar, height=1, fg_color=_W11["border"]).pack(fill="x", padx=16, pady=(8, 10))
+        else:
+            tk.Frame(self.sidebar, height=1, bg="#404040").pack(fill="x", padx=12, pady=(6, 8))
+
+        # ── Navigation buttons ────────────────────────────────────────────────
+        nav_frame = (
+            ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self.sidebar, bg="#1c1c1c")
+        )
         nav_frame.pack(fill="x", padx=8, pady=4)
+
+        self._nav_font_bold = ctk.CTkFont(family=_W11["font"], size=12, weight="bold") if HAS_CUSTOMTKINTER else None
+        self._nav_font_normal = ctk.CTkFont(family=_W11["font"], size=12) if HAS_CUSTOMTKINTER else None
 
         self.nav_wallpaper_btn = (
             ctk.CTkButton(
                 nav_frame,
-                text="🖼️  Wallpaper Manager",
-                height=38,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                text="🖼️   Wallpaper Manager",
+                height=36,
+                font=self._nav_font_bold,
                 anchor="w",
-                fg_color="#2563eb",
-                hover_color="#1d4ed8",
+                corner_radius=6,
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
+                text_color=_W11["text_pri"],
                 command=lambda: self.switch_tool("wallpaper"),
             )
             if HAS_CUSTOMTKINTER
             else tk.Button(nav_frame, text="Wallpaper Manager", command=lambda: self.switch_tool("wallpaper"))
         )
-        self.nav_wallpaper_btn.pack(fill="x", pady=3)
+        self.nav_wallpaper_btn.pack(fill="x", pady=(0, 2))
 
         self.nav_organizer_btn = (
             ctk.CTkButton(
                 nav_frame,
-                text="📁  Download Organizer",
-                height=38,
-                font=ctk.CTkFont(size=12, weight="bold"),
+                text="📁   Download Organizer",
+                height=36,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
                 anchor="w",
+                corner_radius=6,
                 fg_color="transparent",
-                text_color="#94a3b8",
-                hover_color="#1e293b",
+                text_color=_W11["text_sec"],
+                hover_color=_W11["surface_2"],
                 command=lambda: self.switch_tool("organizer"),
             )
             if HAS_CUSTOMTKINTER
             else tk.Button(nav_frame, text="Download Organizer", command=lambda: self.switch_tool("organizer"))
         )
-        self.nav_organizer_btn.pack(fill="x", pady=3)
+        self.nav_organizer_btn.pack(fill="x", pady=(0, 2))
 
-        # Sidebar Bottom Tools (Theme toggle, Updates, Version)
-        bottom_nav = ctk.CTkFrame(self.sidebar, fg_color="transparent") if HAS_CUSTOMTKINTER else tk.Frame(self.sidebar)
+        # ── Bottom tools (pushed to bottom of sidebar) ────────────────────────
+        bottom_nav = (
+            ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(self.sidebar, bg="#1c1c1c")
+        )
         bottom_nav.pack(side="bottom", fill="x", padx=12, pady=16)
 
-        self.update_btn = (
-            ctk.CTkButton(
-                bottom_nav,
-                text="🔄 Check Updates",
-                height=30,
-                font=ctk.CTkFont(size=11),
-                fg_color="#1e293b",
-                hover_color="#334155",
-                command=self.on_manual_check_update,
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Button(bottom_nav, text="Updates", command=self.on_manual_check_update)
-        )
-        self.update_btn.pack(fill="x", pady=(0, 8))
+        # Separator above bottom section
+        if HAS_CUSTOMTKINTER:
+            ctk.CTkFrame(self.sidebar, height=1, fg_color=_W11["border"]).pack(side="bottom", fill="x", padx=16, pady=(0, 4))
 
-        theme_lbl = (
+        if HAS_CUSTOMTKINTER:
             ctk.CTkLabel(
                 bottom_nav,
                 text="Appearance",
-                font=ctk.CTkFont(size=10),
-                text_color="#64748b",
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Label(bottom_nav, text="Appearance")
-        )
-        theme_lbl.pack(anchor="w", pady=(0, 2))
+                font=ctk.CTkFont(family=_W11["font"], size=10),
+                text_color=_W11["text_ter"],
+            ).pack(anchor="w", pady=(0, 3))
 
-        self.theme_menu = (
-            ctk.CTkOptionMenu(
+            self.theme_menu = ctk.CTkOptionMenu(
                 bottom_nav,
                 values=["Dark", "Light", "System"],
-                height=26,
-                font=ctk.CTkFont(size=10),
+                height=28,
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                button_color=_W11["surface_3"],
+                button_hover_color=_W11["border"],
                 command=self._on_theme_change,
             )
-            if HAS_CUSTOMTKINTER
-            else tk.OptionMenu(bottom_nav, tk.StringVar(), "Dark", "Light", "System")
-        )
-        self.theme_menu.pack(fill="x", pady=(0, 8))
-        if HAS_CUSTOMTKINTER:
+            self.theme_menu.pack(fill="x", pady=(0, 10))
             self.theme_menu.set(self.config.theme)
 
-        version_lbl = (
+            self.update_btn = ctk.CTkButton(
+                bottom_nav,
+                text="↻  Check for Updates",
+                height=28,
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                corner_radius=6,
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
+                command=self.on_manual_check_update,
+            )
+            self.update_btn.pack(fill="x", pady=(0, 10))
+
             ctk.CTkLabel(
                 bottom_nav,
-                text="v1.5.0 • Desktop Utility Suite",
-                font=ctk.CTkFont(size=10),
-                text_color="#475569",
-            )
-            if HAS_CUSTOMTKINTER
-            else tk.Label(bottom_nav, text="v1.5.0")
-        )
-        version_lbl.pack(anchor="center")
+                text="Desktop Utility Suite",
+                font=ctk.CTkFont(family=_W11["font"], size=10),
+                text_color=_W11["text_ter"],
+            ).pack(anchor="center")
+        else:
+            self.theme_menu = tk.OptionMenu(bottom_nav, tk.StringVar(), "Dark", "Light", "System")
+            self.theme_menu.pack(fill="x", pady=(0, 6))
+            self.update_btn = tk.Button(bottom_nav, text="Check Updates", command=self.on_manual_check_update)
+            self.update_btn.pack(fill="x", pady=(0, 4))
+            tk.Label(bottom_nav, text="Desktop Utility Suite").pack(anchor="center")
 
-        # 2. Right Main Content Area
+        # ── Thin separator between sidebar and content ────────────────────────
+        if HAS_CUSTOMTKINTER:
+            ctk.CTkFrame(self.main_container, width=1, fg_color=_W11["border"]).pack(side="left", fill="y")
+
+        # ── 2. Right Main Content Area ────────────────────────────────────────
         self.content_area = (
-            ctk.CTkFrame(self.main_container, fg_color="transparent")
+            ctk.CTkFrame(self.main_container, fg_color=_W11["surface_0"])
             if HAS_CUSTOMTKINTER
             else tk.Frame(self.main_container)
         )
@@ -254,30 +292,42 @@ class AppShell:
             self.organizer_frame.pack_forget()
             self.wallpaper_frame.pack(fill="both", expand=True)
             if HAS_CUSTOMTKINTER and hasattr(self, "nav_wallpaper_btn") and hasattr(self, "nav_organizer_btn"):
-                self.nav_wallpaper_btn.configure(
-                    fg_color="#2563eb",
-                    text_color="#ffffff",
-                    hover_color="#1d4ed8",
-                )
-                self.nav_organizer_btn.configure(
-                    fg_color="transparent",
-                    text_color="#94a3b8",
-                    hover_color="#1e293b",
-                )
+                config_wp = {
+                    "fg_color": _W11["accent"],
+                    "text_color": _W11["text_pri"],
+                    "hover_color": _W11["accent_hov"],
+                }
+                config_org = {
+                    "fg_color": "transparent",
+                    "text_color": _W11["text_sec"],
+                    "hover_color": _W11["surface_2"],
+                }
+                if getattr(self, "_nav_font_bold", None):
+                    config_wp["font"] = self._nav_font_bold
+                if getattr(self, "_nav_font_normal", None):
+                    config_org["font"] = self._nav_font_normal
+                self.nav_wallpaper_btn.configure(**config_wp)
+                self.nav_organizer_btn.configure(**config_org)
         elif tool_id == "organizer":
             self.wallpaper_frame.pack_forget()
             self.organizer_frame.pack(fill="both", expand=True)
             if HAS_CUSTOMTKINTER and hasattr(self, "nav_organizer_btn") and hasattr(self, "nav_wallpaper_btn"):
-                self.nav_organizer_btn.configure(
-                    fg_color="#2563eb",
-                    text_color="#ffffff",
-                    hover_color="#1d4ed8",
-                )
-                self.nav_wallpaper_btn.configure(
-                    fg_color="transparent",
-                    text_color="#94a3b8",
-                    hover_color="#1e293b",
-                )
+                config_org = {
+                    "fg_color": _W11["accent"],
+                    "text_color": _W11["text_pri"],
+                    "hover_color": _W11["accent_hov"],
+                }
+                config_wp = {
+                    "fg_color": "transparent",
+                    "text_color": _W11["text_sec"],
+                    "hover_color": _W11["surface_2"],
+                }
+                if getattr(self, "_nav_font_bold", None):
+                    config_org["font"] = self._nav_font_bold
+                if getattr(self, "_nav_font_normal", None):
+                    config_wp["font"] = self._nav_font_normal
+                self.nav_organizer_btn.configure(**config_org)
+                self.nav_wallpaper_btn.configure(**config_wp)
 
     def _on_theme_change(self, new_theme: str) -> None:
         self.config.theme = new_theme

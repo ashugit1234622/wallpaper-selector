@@ -41,8 +41,24 @@ class WindowsWallpaperAdapter(BaseWallpaperAdapter):
         except Exception:
             pass
 
-    def _set_via_com(self, abs_path: str, mode: str) -> bool:
-        """Attempt to set wallpaper across all monitors via IDesktopWallpaper COM interface."""
+    def get_monitors(self) -> list[tuple[str, str]]:
+        """Return list of (monitor_id, display_label) for connected monitors."""
+        monitors: list[tuple[str, str]] = []
+        try:
+            import comtypes
+            import comtypes.client
+            CLSID_DesktopWallpaper = comtypes.GUID("{C2CF3110-460E-4fc1-B9D0-8A1C0C9CC4BD}")
+            desktop_wp = comtypes.client.CreateObject(CLSID_DesktopWallpaper)
+            count = desktop_wp.GetMonitorDevicePathCount()
+            for i in range(count):
+                m_id = desktop_wp.GetMonitorDevicePathAt(i)
+                monitors.append((m_id, f"Display {i + 1}"))
+        except Exception:
+            pass
+        return monitors
+
+    def _set_via_com(self, abs_path: str, mode: str, monitor_id: Optional[str] = None) -> bool:
+        """Attempt to set wallpaper across all or specific monitors via IDesktopWallpaper COM interface."""
         try:
             import ctypes
             from ctypes import wintypes
@@ -56,10 +72,9 @@ class WindowsWallpaperAdapter(BaseWallpaperAdapter):
             position = 4 if mode.lower() == WallpaperPosition.FILL.value.lower() else 3
 
             desktop_wp = comtypes.client.CreateObject(CLSID_DesktopWallpaper)
-            # In IDesktopWallpaper: SetWallpaper(monitorID, wallpaperPath)
-            # Passing None/NULL for monitorID sets it for all monitors
             desktop_wp.SetPosition(position)
-            desktop_wp.SetWallpaper(None, abs_path)
+            # monitor_id = None sets across all displays; specific monitor ID sets for that display
+            desktop_wp.SetWallpaper(monitor_id, abs_path)
             return True
         except Exception:
             return False
@@ -79,7 +94,12 @@ class WindowsWallpaperAdapter(BaseWallpaperAdapter):
         except Exception:
             return False
 
-    def set_wallpaper(self, image_path: Path, mode: str = WallpaperPosition.FILL.value) -> bool:
+    def set_wallpaper(
+        self,
+        image_path: Path,
+        mode: str = WallpaperPosition.FILL.value,
+        monitor_id: Optional[str] = None,
+    ) -> bool:
         if not image_path.exists() or not image_path.is_file():
             return False
 
@@ -89,7 +109,7 @@ class WindowsWallpaperAdapter(BaseWallpaperAdapter):
         self._set_registry_style(mode)
 
         # 2. Try IDesktopWallpaper COM interface first (handles multi-monitor)
-        com_success = self._set_via_com(abs_path, mode)
+        com_success = self._set_via_com(abs_path, mode, monitor_id=monitor_id)
         if com_success:
             return True
 

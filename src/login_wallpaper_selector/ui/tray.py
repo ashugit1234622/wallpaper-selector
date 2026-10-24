@@ -3,7 +3,7 @@
 from __future__ import annotations
 import threading
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 from PIL import Image, ImageDraw
 
 try:
@@ -34,11 +34,19 @@ class SystemTrayManager:
         on_show: Callable[[], None],
         on_rotate_now: Optional[Callable[[], None]] = None,
         on_quit: Optional[Callable[[], None]] = None,
+        on_favorite: Optional[Callable[[], None]] = None,
+        on_open_folder: Optional[Callable[[], None]] = None,
+        on_copy_path: Optional[Callable[[], None]] = None,
+        get_current_title: Optional[Callable[[], Optional[str]]] = None,
         app_name: str = "Desktop Utility Suite",
     ):
         self.on_show = on_show
         self.on_rotate_now = on_rotate_now
         self.on_quit = on_quit
+        self.on_favorite = on_favorite
+        self.on_open_folder = on_open_folder
+        self.on_copy_path = on_copy_path
+        self.get_current_title = get_current_title
         self.app_name = app_name
         self._icon: Optional[Any] = None
         self._thread: Optional[threading.Thread] = None
@@ -61,6 +69,14 @@ class SystemTrayManager:
                 pass
         return create_fallback_tray_icon_image()
 
+    def update_tooltip(self, title_text: str) -> None:
+        """Dynamically update system tray icon tooltip text."""
+        if self._icon is not None and self._is_running:
+            try:
+                self._icon.title = title_text[:125]
+            except Exception:
+                pass
+
     def start(self) -> bool:
         """Start system tray icon in background daemon thread."""
         if not HAS_PYSTRAY:
@@ -72,21 +88,33 @@ class SystemTrayManager:
         try:
             image = self._get_icon_image()
             menu_items = [
-                pystray.MenuItem("Open Desktop Utility Suite", self._handle_show, default=True),
+                pystray.MenuItem(f"Open {self.app_name}", self._handle_show, default=True),
             ]
 
             if self.on_rotate_now is not None:
-                menu_items.append(pystray.MenuItem("🔄 Rotate Wallpaper Now", self._handle_rotate_now))
+                menu_items.append(pystray.MenuItem("🔄 Next Wallpaper (Win+Alt+W)", self._handle_rotate_now))
+
+            if self.on_favorite is not None:
+                menu_items.append(pystray.MenuItem("⭐ Add to Favorites", self._handle_favorite))
+
+            if self.on_open_folder is not None:
+                menu_items.append(pystray.MenuItem("📂 Show in Explorer", self._handle_open_folder))
+
+            if self.on_copy_path is not None:
+                menu_items.append(pystray.MenuItem("📋 Copy Image Path", self._handle_copy_path))
 
             menu_items.append(pystray.Menu.SEPARATOR)
 
             if self.on_quit is not None:
                 menu_items.append(pystray.MenuItem("❌ Quit Application", self._handle_quit))
 
+            curr_title = self.get_current_title() if self.get_current_title else None
+            initial_title = f"{self.app_name}: {curr_title}" if curr_title else f"{self.app_name} (Active)"
+
             self._icon = pystray.Icon(
                 name="DesktopUtilitySuite",
                 icon=image,
-                title=f"{self.app_name} (Auto-Rotate Active)",
+                title=initial_title[:125],
                 menu=pystray.Menu(*menu_items),
             )
 
@@ -94,7 +122,7 @@ class SystemTrayManager:
             self._thread = threading.Thread(target=self._icon.run, daemon=True)
             self._thread.start()
             return True
-        except Exception as e:
+        except Exception:
             self._is_running = False
             self._icon = None
             return False
@@ -124,6 +152,18 @@ class SystemTrayManager:
     def _handle_rotate_now(self, icon=None, item=None) -> None:
         if self.on_rotate_now:
             self.on_rotate_now()
+
+    def _handle_favorite(self, icon=None, item=None) -> None:
+        if self.on_favorite:
+            self.on_favorite()
+
+    def _handle_open_folder(self, icon=None, item=None) -> None:
+        if self.on_open_folder:
+            self.on_open_folder()
+
+    def _handle_copy_path(self, icon=None, item=None) -> None:
+        if self.on_copy_path:
+            self.on_copy_path()
 
     def _handle_quit(self, icon=None, item=None) -> None:
         self.stop()
