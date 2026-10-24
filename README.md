@@ -24,7 +24,20 @@
 
 Choose your platform below to get up and running in under a minute.
 
-### Option 1: Windows 1-Click Installer (Recommended)
+### Option 1: Windows Setup `.exe` Installer (No Python Required)
+
+1. Download **`Desktop-Utility-Suite-v2.0.0-Setup.exe`** from [GitHub Releases](https://github.com/ashugit1234622/wallpaper-selector/releases).
+2. Double-click the installer to launch the modern setup wizard.
+3. Automatically sets up the app in your user profile, creates Desktop & Start Menu shortcuts, registers an uninstaller in Windows Settings, and optionally enables login autostart!
+
+*To compile the installer executable from source:*
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_installer.ps1
+```
+
+---
+
+### Option 2: Windows 1-Click PowerShell (From Source)
 
 Open **PowerShell** (no Administrator privileges required) and run:
 
@@ -34,7 +47,7 @@ cd wallpaper-selector
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-#### What the Windows Installer Does Automatically:
+#### What the PowerShell Installer Does Automatically:
 1. Installs all required dependencies (`customtkinter`, `pillow`, `httpx`, `platformdirs`, `pywin32`, `pystray`) into your user environment.
 2. Creates a desktop shortcut **`Desktop Utility Suite.lnk`** with the bundled high-resolution icon.
 3. Sets up a user PATH shim `login-wallpaper-selector` in `%LOCALAPPDATA%\Microsoft\WindowsApps`.
@@ -43,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ---
 
-### Option 2: Linux & macOS (Native Bash)
+### Option 3: Linux & macOS (Native Bash)
 
 Open terminal and run:
 
@@ -58,7 +71,7 @@ Sets up the package, places a command-line launcher in `~/.local/bin/login-wallp
 
 ---
 
-### Option 3: Python Pip / Developers
+### Option 4: Python Pip / Developers
 
 ```bash
 git clone https://github.com/ashugit1234622/wallpaper-selector.git
