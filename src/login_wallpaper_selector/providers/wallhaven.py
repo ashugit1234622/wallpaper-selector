@@ -83,12 +83,13 @@ class WallhavenProvider(BaseImageProvider):
         if mood and mood != WallpaperMood.ANY:
             search_query = augment_query_with_mood(search_query, mood, category)
 
+        search_for_tv = kwargs.get("search_for_tv", False)
         params = {
             "q": search_query,
             "categories": cat_flag,
             "purity": "100",  # Strict SFW
-            "ratios": "16x9,16x10",  # Native widescreen ratios
-            "atleast": "1920x1080",  # High-definition minimum
+            "ratios": "16x9" if search_for_tv else "16x9,16x10",  # Strict 16:9 for TV mode
+            "atleast": "3840x2160" if search_for_tv else "1920x1080",  # 4K UHD minimum for TV mode
             "sorting": "random",
             "seed": self._generate_seed(),
         }
@@ -144,6 +145,10 @@ class WallhavenProvider(BaseImageProvider):
                     resolution = item.get("resolution", "1920x1080")
                     width = item.get("dimension_x")
                     height = item.get("dimension_y")
+
+                    if search_for_tv:
+                        if not width or not height or width < 3840 or height < 2160:
+                            continue
 
                     candidate = WallpaperCandidate(
                         id=candidate_id,

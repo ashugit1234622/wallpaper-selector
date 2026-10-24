@@ -172,6 +172,10 @@ def generate_desktop_preview_image(
             canvas_w = max(100, int(max_preview_height * screen_ratio))
 
         with Image.open(source_path) as img:
+            try:
+                img.draft("RGB", (canvas_w * 2, canvas_h * 2))
+            except Exception:
+                pass
             if img.mode != "RGB":
                 img = img.convert("RGB")
 

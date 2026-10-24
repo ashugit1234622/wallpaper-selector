@@ -86,13 +86,28 @@ class BingImageProvider(BaseImageProvider):
                                 # If query specifically requested space and this is not space-related, skip
                                 continue
 
-                        download_url = f"{self.BASE_URL}{raw_url}" if raw_url.startswith("/") else raw_url
+                        search_for_tv = kwargs.get("search_for_tv", False)
+                        if search_for_tv:
+                            urlbase = item.get("urlbase")
+                            if not urlbase:
+                                continue
+                            download_url = f"{self.BASE_URL}{urlbase}_UHD.jpg"
+                            cand_width = 3840
+                            cand_height = 2160
+                            cand_title = f"{title} (4K UHD)"
+                        else:
+                            download_url = f"{self.BASE_URL}{raw_url}" if raw_url.startswith("/") else raw_url
+                            cand_width = 1920
+                            cand_height = 1080
+                            cand_title = title
+
+                        preview_url = f"{self.BASE_URL}{raw_url}" if raw_url.startswith("/") else download_url
 
                         candidate = WallpaperCandidate(
                             id=candidate_id,
                             category=category or WallpaperCategory.NATURE,
                             provider_name=self.name,
-                            title=title,
+                            title=cand_title,
                             download_url=download_url,
                             source_url=copyright_link,
                             creator=copyright_text,
@@ -100,9 +115,9 @@ class BingImageProvider(BaseImageProvider):
                             license_url="https://www.microsoft.com/en-us/legal/terms-of-use",
                             attribution_required=True,
                             attribution_text=copyright_text,
-                            preview_url=download_url,
-                            width=1920,
-                            height=1080,
+                            preview_url=preview_url,
+                            width=cand_width,
+                            height=cand_height,
                             mime_type="image/jpeg",
                             raw_metadata=item,
                         )

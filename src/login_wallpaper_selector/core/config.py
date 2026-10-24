@@ -36,7 +36,7 @@ class AppConfig:
     last_update_check_timestamp: Optional[str] = None
     update_check_interval_hours: int = 4
     global_hotkey_enabled: bool = True
-    global_hotkey_combo: str = "Win+Alt+W"
+    global_hotkey_combo: str = "Ctrl+Alt+W"
     pause_on_battery: bool = True
     target_monitor_id: Optional[str] = None  # None means all monitors
 
@@ -45,6 +45,11 @@ class AppConfig:
     organizer_destination: Optional[str] = None
     organizer_recursive: bool = False
     organizer_conflict_policy: str = "keep_both"  # "keep_both", "skip"
+
+    # Android TV (CleanMyTV) Bridge integration
+    search_for_tv: bool = False
+    tv_host: str = "192.168.1.37"
+    cleanmytv_dir: str = r"C:\Users\Ashirwad\Desktop\projects\clean my tv"
 
     @classmethod
     def get_config_file_path(cls) -> Path:
@@ -78,6 +83,9 @@ class AppConfig:
             import dataclasses
             valid_fields = {f.name for f in dataclasses.fields(cls)}
             filtered = {k: v for k, v in data.items() if k in valid_fields}
+            # Migrate legacy Windows-conflicting Win+Alt+W default to Ctrl+Alt+W
+            if filtered.get("global_hotkey_combo") == "Win+Alt+W":
+                filtered["global_hotkey_combo"] = "Ctrl+Alt+W"
             return cls(**filtered)
         except Exception:
             return cls()

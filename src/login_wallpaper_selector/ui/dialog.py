@@ -108,6 +108,7 @@ class WallpaperSelectorDialog:
 
         if hasattr(self, "root") and self.root:
             self._schedule_next_rotation_check(delay_ms=3000)
+            self.root.after(2000, self._check_external_sync)
 
         if not self.parent_frame and getattr(self.config, "check_for_updates_on_startup", True) and hasattr(self, "root") and self.root:
             self.root.after(1500, self._check_for_updates_startup)
@@ -216,12 +217,13 @@ class WallpaperSelectorDialog:
         )
         inner_bar.pack(fill="x", padx=16, pady=8)
 
-        # Responsive 5-column grid for action buttons
+        # Responsive 6-column grid for action buttons
         inner_bar.columnconfigure(0, weight=1)
         inner_bar.columnconfigure(1, weight=1)
         inner_bar.columnconfigure(2, weight=1)
         inner_bar.columnconfigure(3, weight=2)
-        inner_bar.columnconfigure(4, weight=1)
+        inner_bar.columnconfigure(4, weight=2)
+        inner_bar.columnconfigure(5, weight=1)
 
         if HAS_CUSTOMTKINTER:
             self.retry_btn = ctk.CTkButton(
@@ -279,6 +281,20 @@ class WallpaperSelectorDialog:
             )
             self.apply_btn.grid(row=0, column=3, padx=3, pady=0, sticky="ew")
 
+            self.apply_tv_btn = ctk.CTkButton(
+                inner_bar,
+                text="📺  Apply to TV",
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                corner_radius=6,
+                state="disabled",
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_pri"],
+                command=self.on_apply_tv,
+            )
+            self.apply_tv_btn.grid(row=0, column=4, padx=3, pady=0, sticky="ew")
+
             self.close_btn = ctk.CTkButton(
                 inner_bar,
                 text="Done",
@@ -290,7 +306,7 @@ class WallpaperSelectorDialog:
                 text_color=_W11["text_sec"],
                 command=self.on_close,
             )
-            self.close_btn.grid(row=0, column=4, padx=3, pady=0, sticky="ew")
+            self.close_btn.grid(row=0, column=5, padx=3, pady=0, sticky="ew")
         else:
             self.retry_btn = tk.Button(inner_bar, text="🔄 Try Another", state="disabled", command=self.on_retry)
             self.retry_btn.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
@@ -300,8 +316,10 @@ class WallpaperSelectorDialog:
             self.open_folder_btn.grid(row=0, column=2, padx=2, pady=2, sticky="ew")
             self.apply_btn = tk.Button(inner_bar, text="✓ Apply to Desktop", state="disabled", command=self.on_apply_staged)
             self.apply_btn.grid(row=0, column=3, padx=2, pady=2, sticky="ew")
+            self.apply_tv_btn = tk.Button(inner_bar, text="📺 Apply to TV", state="disabled", command=self.on_apply_tv)
+            self.apply_tv_btn.grid(row=0, column=4, padx=2, pady=2, sticky="ew")
             self.close_btn = tk.Button(inner_bar, text="Done / Close", command=self.on_close)
-            self.close_btn.grid(row=0, column=4, padx=2, pady=2, sticky="ew")
+            self.close_btn.grid(row=0, column=5, padx=2, pady=2, sticky="ew")
 
         # Scrollable container for the main content area so nothing is EVER clipped or crammed on any screen size
         if HAS_CUSTOMTKINTER:
@@ -646,18 +664,30 @@ class WallpaperSelectorDialog:
             )
             self.hotkey_chk.pack(side="left", padx=(10, 4), pady=6)
 
-            curr_combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+            curr_combo = getattr(self.config, "global_hotkey_combo", "Ctrl+Alt+W")
+            if curr_combo == "Win+Alt+W":
+                curr_combo = "Ctrl+Alt+W"
             self.hotkey_combo_var = ctk.StringVar(value=curr_combo)
             self.hotkey_combo_menu = ctk.CTkOptionMenu(
                 settings_frame,
-                values=["Win+Alt+W", "Ctrl+Alt+W", "Win+Shift+W"],
+                values=["Ctrl+Alt+W", "Ctrl+Shift+W", "Alt+Shift+W", "Ctrl+Alt+Shift+W", "Win+Alt+W"],
                 variable=self.hotkey_combo_var,
-                width=108,
+                width=112,
                 height=26,
                 font=ctk.CTkFont(family=_W11["font"], size=11),
                 command=self.on_hotkey_combo_change,
             )
             self.hotkey_combo_menu.pack(side="left", padx=(0, 6), pady=6)
+
+            self.tv_search_var = ctk.BooleanVar(value=bool(getattr(self.config, "search_for_tv", False)))
+            self.tv_search_chk = ctk.CTkCheckBox(
+                settings_frame,
+                text="📺 4K TV Mode (3840x2160)",
+                variable=self.tv_search_var,
+                font=ctk.CTkFont(size=12),
+                command=self.on_toggle_tv_search,
+            )
+            self.tv_search_chk.pack(side="left", padx=(10, 4), pady=6)
 
             self.lockscreen_var = ctk.BooleanVar(value=False)
 
@@ -714,17 +744,30 @@ class WallpaperSelectorDialog:
             )
             self.hotkey_chk.pack(side="left", padx=(8, 4), pady=6)
 
-            curr_combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+            curr_combo = getattr(self.config, "global_hotkey_combo", "Ctrl+Alt+W")
+            if curr_combo == "Win+Alt+W":
+                curr_combo = "Ctrl+Alt+W"
             self.hotkey_combo_var = tk.StringVar(value=curr_combo)
             self.hotkey_combo_menu = tk.OptionMenu(
                 settings_frame,
                 self.hotkey_combo_var,
-                "Win+Alt+W",
                 "Ctrl+Alt+W",
-                "Win+Shift+W",
+                "Ctrl+Shift+W",
+                "Alt+Shift+W",
+                "Ctrl+Alt+Shift+W",
+                "Win+Alt+W",
                 command=self.on_hotkey_combo_change,
             )
             self.hotkey_combo_menu.pack(side="left", padx=(0, 6), pady=6)
+
+            self.tv_search_var = tk.BooleanVar(value=bool(getattr(self.config, "search_for_tv", False)))
+            self.tv_search_chk = tk.Checkbutton(
+                settings_frame,
+                text="📺 4K TV Mode (3840x2160)",
+                variable=self.tv_search_var,
+                command=self.on_toggle_tv_search,
+            )
+            self.tv_search_chk.pack(side="left", padx=(8, 4), pady=6)
 
             self.lockscreen_var = tk.BooleanVar(value=False)
 
@@ -1024,9 +1067,40 @@ class WallpaperSelectorDialog:
         )
         self.status_lbl.pack(anchor="w")
 
+        # Progress row with Stop button on the left and progress bar on the right
+        self.progress_row = (
+            ctk.CTkFrame(status_frame, fg_color="transparent")
+            if HAS_CUSTOMTKINTER
+            else tk.Frame(status_frame)
+        )
+        self.progress_row.pack(fill="x", pady=(4, 0))
+
+        self.stop_btn = (
+            ctk.CTkButton(
+                self.progress_row,
+                text="⏹  Stop",
+                width=68,
+                height=22,
+                font=ctk.CTkFont(family=_W11["font"], size=11, weight="bold"),
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["danger"],
+                text_color=_W11["text_pri"],
+                corner_radius=4,
+                command=self.on_stop_progress,
+            )
+            if HAS_CUSTOMTKINTER
+            else tk.Button(
+                self.progress_row,
+                text="⏹ Stop",
+                command=self.on_stop_progress,
+                font=("Segoe UI", 8),
+            )
+        )
+        # Note: self.stop_btn starts hidden; packed before self.progress_bar only when busy
+
         if HAS_CUSTOMTKINTER:
-            self.progress_bar = ctk.CTkProgressBar(status_frame, height=4, corner_radius=2)
-            self.progress_bar.pack(fill="x", pady=(4, 0))
+            self.progress_bar = ctk.CTkProgressBar(self.progress_row, height=6, corner_radius=3)
+            self.progress_bar.pack(side="left", fill="x", expand=True, pady=0)
             self.progress_bar.set(0)
         else:
             self.progress_bar = None
@@ -1084,7 +1158,10 @@ class WallpaperSelectorDialog:
         def _update():
             if hasattr(self, "cat_buttons"):
                 for cat, btn in self.cat_buttons.items():
-                    if busy and self.current_category == cat:
+                    # Local Storage and Favorites remain fully interactive even during background search
+                    if cat in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+                        btn.configure(state="normal") if HAS_CUSTOMTKINTER else btn.config(state="normal")
+                    elif busy and self.current_category == cat:
                         btn.configure(state="normal") if HAS_CUSTOMTKINTER else btn.config(state="normal")
                     else:
                         btn.configure(state=state) if HAS_CUSTOMTKINTER else btn.config(state=state)
@@ -1110,14 +1187,36 @@ class WallpaperSelectorDialog:
                 if hasattr(self, "star_buttons"):
                     for sb in self.star_buttons:
                         sb.configure(state=action_state) if HAS_CUSTOMTKINTER else sb.config(state=action_state)
-                if hasattr(self, "apply_btn") and self.staged_metadata and self.staged_metadata != self.current_metadata:
-                    self.apply_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_btn.config(state=action_state)
+                if hasattr(self, "apply_btn"):
+                    # Keep Apply to Desktop enabled when staged preview is available
+                    if self.staged_metadata and self.staged_metadata != self.current_metadata:
+                        self.apply_btn.configure(state="normal") if HAS_CUSTOMTKINTER else self.apply_btn.config(state="normal")
+                    else:
+                        self.apply_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_btn.config(state=action_state)
                 if hasattr(self, "lockscreen_btn"):
                     self.lockscreen_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.lockscreen_btn.config(state=action_state)
+                if hasattr(self, "apply_tv_btn"):
+                    self.apply_tv_btn.configure(state=action_state) if HAS_CUSTOMTKINTER else self.apply_tv_btn.config(state=action_state)
+            if hasattr(self, "stop_btn"):
+                if busy:
+                    if hasattr(self, "progress_bar") and self.progress_bar:
+                        self.stop_btn.pack(side="left", padx=(0, 8), pady=0, before=self.progress_bar)
+                    else:
+                        self.stop_btn.pack(side="left", padx=(0, 8), pady=0)
+                else:
+                    self.stop_btn.pack_forget()
         if hasattr(self, "root") and self.root:
             self.root.after(0, _update)
         else:
             _update()
+
+    def on_stop_progress(self) -> None:
+        """Cancel active search or download progress immediately and return to ready state."""
+        self._current_search_id += 1
+        if hasattr(self, "progress_bar") and self.progress_bar:
+            self.progress_bar.set(0)
+        self.set_busy(False)
+        self.set_status("⏹ Search stopped. Ready.")
 
     def on_mode_change(self, *args) -> None:
         new_mode = self.mode_var.get()
@@ -1171,6 +1270,190 @@ class WallpaperSelectorDialog:
     def on_lockscreen_toggle(self) -> None:
         """Compatibility alias for lock screen setting."""
         self.on_apply_lockscreen()
+
+    def on_toggle_tv_search(self) -> None:
+        """Handle toggling of Search for TV mode."""
+        enabled = self.tv_search_var.get()
+        self.config.search_for_tv = enabled
+        self.config.save()
+        if enabled:
+            self.set_status("📺 4K TV Mode ON: Searching will strictly fetch 3840x2160 UHD wallpapers matching your 4K TV.")
+        else:
+            self.set_status("4K TV Mode OFF: Standard desktop wallpaper searches.")
+
+    def on_apply_tv(self) -> None:
+        """Apply the currently staged/previewed wallpaper to the Android TV launcher via CleanMyTV."""
+        if self.is_busy:
+            return
+
+        target_meta = self.staged_metadata or self.current_metadata
+        if not target_meta:
+            self.set_status("No wallpaper available to apply to TV.")
+            return
+
+        target_path = Path(target_meta.local_path)
+        if not target_path.exists():
+            self.set_status("Error: Wallpaper file not found on disk.")
+            return
+
+        self.set_busy(True)
+        if HAS_CUSTOMTKINTER:
+            self.apply_tv_btn.configure(text="📺  Applying to TV...", state="disabled", fg_color=_W11["accent"])
+        else:
+            self.apply_tv_btn.config(text="📺 Applying...", state="disabled")
+
+        tv_ip = getattr(self.config, "tv_host", "192.168.1.37")
+        self.set_status(f"Connecting to Android TV at {tv_ip}...", progress=0.1)
+
+        def _worker():
+            from ..core.tv_bridge import TvBridge
+            bridge = TvBridge(
+                cleanmytv_dir=getattr(self.config, "cleanmytv_dir", None),
+                host=tv_ip,
+            )
+
+            def _on_prog(pct: float, msg: str):
+                def _update_ui():
+                    self.set_status(f"📺 {msg}", progress=pct)
+                if hasattr(self, "root") and self.root:
+                    self.root.after(0, _update_ui)
+
+            crop_16_9 = bool(getattr(self.config, "search_for_tv", False))
+            success, message = bridge.apply_wallpaper(
+                image_path=target_path,
+                host=tv_ip,
+                crop_16_9=crop_16_9,
+                on_progress=_on_prog,
+            )
+
+            def _finish():
+                self.set_busy(False)
+                if success:
+                    self.set_status(f"✓ {message}", progress=1.0)
+                    if HAS_CUSTOMTKINTER:
+                        self.apply_tv_btn.configure(text="✓  Applied to TV!", fg_color=_W11["success"], state="disabled")
+                    else:
+                        self.apply_tv_btn.config(text="✓ Applied to TV!", state="disabled")
+                    self.root.after(3500, self._reset_apply_tv_btn)
+                else:
+                    self.set_status(f"TV Error: {message}", progress=0.0)
+                    self._reset_apply_tv_btn()
+                    self._show_tv_connection_error_dialog(message)
+
+            if hasattr(self, "root") and self.root:
+                self.root.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _reset_apply_tv_btn(self) -> None:
+        """Reset the Apply to TV button to normal interactive state."""
+        target_meta = self.staged_metadata or self.current_metadata
+        btn_state = "normal" if target_meta else "disabled"
+        if hasattr(self, "apply_tv_btn"):
+            if HAS_CUSTOMTKINTER:
+                self.apply_tv_btn.configure(text="📺  Apply to TV", fg_color=_W11["surface_2"], state=btn_state)
+            else:
+                self.apply_tv_btn.config(text="📺 Apply to TV", state=btn_state)
+
+    def _show_tv_connection_error_dialog(self, error_message: str) -> None:
+        """Show a modern modal popup allowing the user to inspect/edit TV IP and retry."""
+        current_ip = getattr(self.config, "tv_host", "192.168.1.37")
+        if HAS_CUSTOMTKINTER:
+            dialog = ctk.CTkToplevel(self.root)
+            dialog.title("Android TV Connection")
+            dialog.geometry("440x260")
+            dialog.resizable(False, False)
+            dialog.configure(fg_color=_W11["bg"])
+            dialog.transient(self.root)
+            dialog.grab_set()
+
+            try:
+                x = self.root.winfo_x() + (self.root.winfo_width() - 440) // 2
+                y = self.root.winfo_y() + (self.root.winfo_height() - 260) // 2
+                dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+            except Exception:
+                pass
+
+            title = ctk.CTkLabel(
+                dialog,
+                text="📺  Cannot Connect to Android TV",
+                font=ctk.CTkFont(family=_W11["font"], size=15, weight="bold"),
+                text_color=_W11["text_pri"],
+            )
+            title.pack(anchor="w", padx=20, pady=(18, 4))
+
+            desc = ctk.CTkLabel(
+                dialog,
+                text=f"Could not reach TV. Verify your TV is turned on and connected to the local Wi-Fi.\n\nError details: {error_message[:120]}",
+                font=ctk.CTkFont(family=_W11["font"], size=11),
+                text_color=_W11["text_sec"],
+                wraplength=400,
+                justify="left",
+            )
+            desc.pack(anchor="w", padx=20, pady=(0, 10))
+
+            ip_row = ctk.CTkFrame(dialog, fg_color="transparent")
+            ip_row.pack(fill="x", padx=20, pady=(0, 15))
+
+            ip_lbl = ctk.CTkLabel(
+                ip_row,
+                text="TV IP Address:",
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                text_color=_W11["text_sec"],
+            )
+            ip_lbl.pack(side="left", padx=(0, 10))
+
+            ip_entry = ctk.CTkEntry(
+                ip_row,
+                width=180,
+                height=30,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+            )
+            ip_entry.insert(0, current_ip)
+            ip_entry.pack(side="left")
+
+            btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+            btn_row.pack(fill="x", padx=20, pady=(5, 15))
+
+            def _on_retry():
+                new_ip = ip_entry.get().strip()
+                if new_ip:
+                    self.config.tv_host = new_ip
+                    self.config.save()
+                dialog.destroy()
+                self.on_apply_tv()
+
+            retry_btn = ctk.CTkButton(
+                btn_row,
+                text="Save & Retry",
+                width=120,
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12, weight="bold"),
+                fg_color=_W11["accent"],
+                hover_color=_W11["accent_hov"],
+                command=_on_retry,
+            )
+            retry_btn.pack(side="right", padx=(8, 0))
+
+            cancel_btn = ctk.CTkButton(
+                btn_row,
+                text="Cancel",
+                width=80,
+                height=32,
+                font=ctk.CTkFont(family=_W11["font"], size=12),
+                fg_color=_W11["surface_2"],
+                hover_color=_W11["surface_3"],
+                text_color=_W11["text_sec"],
+                command=dialog.destroy,
+            )
+            cancel_btn.pack(side="right")
+        else:
+            from tkinter import simpledialog
+            new_ip = simpledialog.askstring("Android TV IP", f"Could not connect to {current_ip}.\nEnter TV IP address:", initialvalue=current_ip, parent=self.root)
+            if new_ip and new_ip.strip():
+                self.config.tv_host = new_ip.strip()
+                self.config.save()
+                self.on_apply_tv()
 
     def on_layout_toggle(self) -> None:
         """Handle toggling of desktop layout awareness."""
@@ -1284,6 +1567,10 @@ class WallpaperSelectorDialog:
 
         try:
             with Image.open(local_path) as img:
+                try:
+                    img.draft("RGB", (width * 4, height * 4))
+                except Exception:
+                    pass
                 img_w, img_h = img.size
                 target_ratio = width / height
                 current_ratio = img_w / img_h
@@ -1296,7 +1583,7 @@ class WallpaperSelectorDialog:
                     top = (img_h - crop_h) // 2
                     box = (0, top, img_w, top + crop_h)
 
-                cropped = img.crop(box).resize((width, height), Image.Resampling.LANCZOS)
+                cropped = img.crop(box).resize((width, height), Image.Resampling.BILINEAR)
 
                 if HAS_CUSTOMTKINTER:
                     ctk_thumb = ctk.CTkImage(light_image=cropped, dark_image=cropped, size=(width, height))
@@ -1340,10 +1627,19 @@ class WallpaperSelectorDialog:
         if not items:
             return
 
+        MAX_FILMSTRIP_ITEMS = 5
+        total = len(items)
+        if total <= MAX_FILMSTRIP_ITEMS:
+            visible_indices = list(range(total))
+        else:
+            half = MAX_FILMSTRIP_ITEMS // 2
+            start = max(0, min(self._recent_index - half, total - MAX_FILMSTRIP_ITEMS))
+            visible_indices = list(range(start, start + MAX_FILMSTRIP_ITEMS))
+
         # Headless mock safety for unit tests
         if "MagicMock" in str(type(self.filmstrip_frame)) or "MagicMock" in str(type(getattr(self, "root", None))):
-            for idx, item in enumerate(items):
-                mock_btn = type("MockButton", (), {"is_active": (idx == self._recent_index)})()
+            for idx in visible_indices:
+                mock_btn = type("MockButton", (), {"is_active": (idx == self._recent_index), "target_index": idx})()
                 self.filmstrip_buttons.append(mock_btn)
             return
 
@@ -1354,7 +1650,8 @@ class WallpaperSelectorDialog:
             self.filmstrip_inner_frame = tk.Frame(self.filmstrip_frame)
             self.filmstrip_inner_frame.pack(anchor="center")
 
-        for idx, item in enumerate(items):
+        for idx in visible_indices:
+            item = items[idx]
             is_active = (idx == self._recent_index)
             thumb_img = self._get_or_create_thumbnail(item, width=54, height=30)
 
@@ -1644,7 +1941,7 @@ class WallpaperSelectorDialog:
             self._hotkey_listener = None
 
     def _start_global_hotkey(self) -> None:
-        """Start the Windows global hotkey listener if enabled in config."""
+        """Start the Windows global hotkey listener if enabled in config with fallback detection."""
         if not getattr(self.config, "global_hotkey_enabled", True) or os.name != "nt":
             return
         if self._hotkey_listener:
@@ -1653,9 +1950,29 @@ class WallpaperSelectorDialog:
             except Exception:
                 pass
             self._hotkey_listener = None
-        combo = getattr(self.config, "global_hotkey_combo", "Win+Alt+W")
+
+        combo = getattr(self.config, "global_hotkey_combo", "Ctrl+Alt+W")
+        if combo == "Win+Alt+W":
+            combo = "Ctrl+Alt+W"
+            self.config.global_hotkey_combo = combo
+            self.config.save()
+            if hasattr(self, "hotkey_combo_var"):
+                self.hotkey_combo_var.set(combo)
+
         self._hotkey_listener = GlobalHotkeyListener(combo=combo, on_triggered=self.on_hotkey_triggered)
-        self._hotkey_listener.start()
+        started = self._hotkey_listener.start()
+        if started:
+            active_combo = getattr(self._hotkey_listener, "active_combo", combo) or combo
+            if active_combo != combo:
+                self.config.global_hotkey_combo = active_combo
+                self.config.save()
+                if hasattr(self, "hotkey_combo_var"):
+                    self.hotkey_combo_var.set(active_combo)
+                self.set_status(f"⚡ Hotkey '{combo}' in use by Windows; automatically switched to '{active_combo}'.")
+            else:
+                self.set_status(f"⚡ Global hotkey active ({active_combo}).")
+        else:
+            self.set_status(f"⚠️ Could not register global hotkey ({combo}). Try selecting another combination.")
 
     def on_hotkey_toggle(self) -> None:
         """Handle toggling of global hotkey setting."""
@@ -1664,7 +1981,6 @@ class WallpaperSelectorDialog:
         self.config.save()
         if enabled:
             self._start_global_hotkey()
-            self.set_status(f"⚡ Global hotkey enabled ({getattr(self.config, 'global_hotkey_combo', 'Win+Alt+W')}).")
         else:
             if self._hotkey_listener:
                 self._hotkey_listener.stop()
@@ -1677,7 +1993,6 @@ class WallpaperSelectorDialog:
         self.config.save()
         if getattr(self.config, "global_hotkey_enabled", True):
             self._start_global_hotkey()
-            self.set_status(f"⚡ Global hotkey updated to {new_combo}.")
 
     def on_hotkey_triggered(self) -> None:
         """Handle background hotkey trigger to rotate wallpaper and send toast notifications."""
@@ -1686,7 +2001,7 @@ class WallpaperSelectorDialog:
         self._is_hotkey_rotating = True
         send_toast_notification(
             "Login Wallpaper Selector",
-            "Fetching new wallpaper in background...",
+            "Fetching new desktop wallpaper in background...",
             tray_mgr=self._tray_mgr,
         )
 
@@ -1694,22 +2009,33 @@ class WallpaperSelectorDialog:
             try:
                 from ..core.scheduler import WallpaperRotationDaemon
                 daemon = WallpaperRotationDaemon(self.config, self.history, self.cache, self.router)
+                # Enforce desktop-only rotation with native desktop resolution matching (search_for_tv=False)
                 meta, err = daemon.rotate_now(
                     color=getattr(self, "selected_color", ColorPalette.ANY),
                     mood=getattr(self, "selected_mood", WallpaperMood.ANY),
+                    search_for_tv=False,
                 )
                 if meta:
                     info = getattr(meta, "time_of_day_info", None) or meta.category or "Wallpaper"
                     send_toast_notification(
-                        "Wallpaper Changed",
+                        "Desktop Wallpaper Changed",
                         f"✓ '{meta.title}' ({info})",
                         tray_mgr=self._tray_mgr,
                     )
                     if hasattr(self, "root") and self.root:
                         def _sync_ui():
-                            self.current_metadata = meta
                             self._record_fetched_wallpaper(meta)
-                            self._update_preview_and_attribution(meta)
+                            # Only update preview if user is NOT in the middle of a manual staged preview
+                            if self.staged_metadata is None or self.staged_metadata == self.current_metadata:
+                                self.current_metadata = meta
+                                self._update_preview_and_attribution(meta)
+                                self.set_status(f"✓ Hotkey rotated desktop: '{meta.title}'")
+                            else:
+                                self.set_status(f"✓ Hotkey rotated desktop: '{meta.title}' (Active manual preview preserved)")
+                            # Reset the auto-rotate timer so the next interval starts from now
+                            if getattr(self.config, "rotation_enabled", False):
+                                interval_ms = int(getattr(self.config, "rotation_interval_minutes", 180) * 60 * 1000)
+                                self._schedule_next_rotation_check(delay_ms=interval_ms)
                         try:
                             self.root.after(0, _sync_ui)
                         except Exception:
@@ -1717,7 +2043,7 @@ class WallpaperSelectorDialog:
                 else:
                     send_toast_notification(
                         "Rotation Error",
-                        f"Failed to rotate wallpaper: {err}",
+                        f"Failed to rotate desktop wallpaper: {err}",
                         tray_mgr=self._tray_mgr,
                     )
             finally:
@@ -1984,8 +2310,12 @@ class WallpaperSelectorDialog:
             self.set_status(f"Category {category.value} toggled off.")
             return
 
-        if self.is_busy:
-            return
+        was_busy = self.is_busy
+        prev_cat = self.current_category
+        if was_busy:
+            # During background progress, only Local Storage and Favorites can be selected
+            if category not in (WallpaperCategory.LOCAL_STORAGE, WallpaperCategory.FAVORITES):
+                return
 
         # Explicit category selected: clear search entry to focus on category
         if hasattr(self, "search_entry"):
@@ -1997,7 +2327,7 @@ class WallpaperSelectorDialog:
         self._update_category_buttons(category)
         self._populate_suggestion_chips(category)
         if category == WallpaperCategory.LOCAL_STORAGE:
-            self._handle_local_storage()
+            self._handle_local_storage(previous_category=prev_cat, was_busy=was_busy)
         elif category == WallpaperCategory.FAVORITES:
             self._handle_favorites_category()
         else:
@@ -2126,17 +2456,23 @@ class WallpaperSelectorDialog:
         stars_str = ("★" * new_rating) if new_rating > 0 else "cleared"
         self.set_status(f"Rating {stars_str} recorded for {target_meta.title}")
 
-    def _handle_local_storage(self) -> None:
+    def _handle_local_storage(self, previous_category: Optional[WallpaperCategory] = None, was_busy: bool = False) -> None:
         self.set_status("Opening native file picker...")
         selected_path = pick_local_image(self.root)
 
         if not selected_path:
             # User canceled the file picker
-            self.current_category = None
-            self._update_category_buttons(None)
-            self.set_status("Local file selection cancelled.")
+            if was_busy:
+                self.current_category = previous_category
+                self._update_category_buttons(previous_category)
+                self.set_status("Local file selection cancelled. Background search continuing...")
+            else:
+                self.current_category = None
+                self._update_category_buttons(None)
+                self.set_status("Local file selection cancelled.")
             return
 
+        selected_path = Path(selected_path)
         self._current_search_id += 1
         fetch_id = self._current_search_id
         self.set_busy(True)
@@ -2207,6 +2543,8 @@ class WallpaperSelectorDialog:
                 status_callback=_status,
                 color=self.selected_color,
                 mood=self.selected_mood,
+                search_for_tv=bool(self.tv_search_var.get()) if hasattr(self, "tv_search_var") else None,
+                cancel_check=lambda: self._current_search_id != fetch_id,
             )
 
             if self._current_search_id != fetch_id:
@@ -2275,8 +2613,24 @@ class WallpaperSelectorDialog:
             self.set_status("Error: Wallpaper file not found on disk.")
             return
 
+        keep_search = False
+        if self.is_busy:
+            discard = messagebox.askyesno(
+                "Background Search Active",
+                "A background search is currently running.\n\n"
+                "Do you want to discard the ongoing search and apply the previewed wallpaper?\n\n"
+                "• Click 'Yes' to stop the search and apply preview.\n"
+                "• Click 'No' to keep the search running while applying preview.",
+                parent=self.root,
+            )
+            if discard:
+                self._current_search_id += 1
+            else:
+                keep_search = True
+
         mode = self.mode_var.get()
-        self.set_busy(True)
+        if not keep_search:
+            self.set_busy(True)
         self.set_status("Applying wallpaper to desktop...", progress=0.8)
 
         def _worker():
@@ -2298,7 +2652,8 @@ class WallpaperSelectorDialog:
                     _ui_update()
             else:
                 self.set_status("Error: Desktop adapter could not apply wallpaper.")
-            self.set_busy(False)
+            if not keep_search:
+                self.set_busy(False)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -2327,6 +2682,11 @@ class WallpaperSelectorDialog:
         if not local_path.exists():
             return None
         m = mode or (self.mode_var.get() if hasattr(self, "mode_var") else getattr(self.config, "default_position", "Fill"))
+        layout_on = bool(self.layout_var.get()) if hasattr(self, "layout_var") else True
+
+        if not hasattr(self, "_preview_cache"):
+            self._preview_cache = {}
+
         try:
             target_w = 540
             if hasattr(self, "root") and hasattr(self.root, "winfo_width"):
@@ -2337,18 +2697,32 @@ class WallpaperSelectorDialog:
                 except Exception:
                     target_w = 540
 
+            cache_key = (str(local_path), m, target_w, layout_on)
+            if cache_key in self._preview_cache:
+                return self._preview_cache[cache_key]
+
             preview_img = generate_desktop_preview_image(
                 local_path,
                 mode=m,
                 max_preview_width=target_w,
                 max_preview_height=150,
-                layout_aware=bool(self.layout_var.get()) if hasattr(self, "layout_var") else True,
+                layout_aware=layout_on,
                 draw_mockup_frame=True,
             )
             if not preview_img:
                 img = Image.open(local_path)
-                img.thumbnail((target_w, 150), Image.Resampling.LANCZOS)
+                try:
+                    img.draft("RGB", (target_w * 2, 300))
+                except Exception:
+                    pass
+                img.thumbnail((target_w, 150), Image.Resampling.BILINEAR)
                 preview_img = img
+
+            if preview_img:
+                if len(self._preview_cache) > 20:
+                    self._preview_cache.pop(next(iter(self._preview_cache)))
+                self._preview_cache[cache_key] = preview_img
+
             return preview_img
         except Exception:
             return None
@@ -2481,6 +2855,12 @@ class WallpaperSelectorDialog:
                     self.apply_btn.configure(state="normal", text="✓  Apply to Desktop", fg_color=_W11["accent"])
                 else:
                     self.apply_btn.configure(state="disabled", text="✓  Applied!", fg_color=_W11["success"])
+                if hasattr(self, "apply_tv_btn"):
+                    self.apply_tv_btn.configure(
+                        state="normal",
+                        text="📺  Apply to TV",
+                        fg_color=_W11["surface_2"],
+                    )
             else:
                 self.retry_btn.config(state="normal")
                 self.save_btn.config(state="normal", text="💾 Save Image")
@@ -2501,6 +2881,11 @@ class WallpaperSelectorDialog:
                     self.apply_btn.config(state="normal", text="✓ Apply to Desktop")
                 else:
                     self.apply_btn.config(state="disabled", text="✓ Applied!")
+                if hasattr(self, "apply_tv_btn"):
+                    self.apply_tv_btn.config(
+                        state="normal",
+                        text="📺 Apply to TV",
+                    )
 
             # Update attribution text
             attr_text = meta.attribution_text or f"{meta.title} ({meta.provider})"
@@ -2649,6 +3034,8 @@ class WallpaperSelectorDialog:
                     color=color,
                     mood=mood,
                     season=active_season,
+                    search_for_tv=bool(self.tv_search_var.get()) if hasattr(self, "tv_search_var") else None,
+                    cancel_check=lambda: self._current_search_id != fetch_id,
                 )
 
             if self._current_search_id != fetch_id:
@@ -2735,6 +3122,8 @@ class WallpaperSelectorDialog:
                 color=self.selected_color,
                 mood=self.selected_mood,
                 keyword=query,
+                search_for_tv=bool(self.tv_search_var.get()) if hasattr(self, "tv_search_var") else None,
+                cancel_check=lambda: self._current_search_id != search_id,
             )
 
             if self._current_search_id != search_id:
@@ -2821,6 +3210,37 @@ class WallpaperSelectorDialog:
             else:
                 self.set_status(f"✓ You are running the latest version (v{res.current_version}).")
         threading.Thread(target=_worker, daemon=True).start()
+
+    
+    def _check_external_sync(self) -> None:
+        """Poll for wallpaper updates triggered by external processes (e.g. mobile companion app)."""
+        try:
+            if hasattr(self, "recent_mgr") and self.recent_mgr:
+                hist_file = getattr(self.recent_mgr, "history_file", None)
+                if hist_file and hist_file.exists():
+                    mtime = hist_file.stat().st_mtime
+                    if not hasattr(self, "_last_synced_mtime"):
+                        self._last_synced_mtime = mtime
+                    elif mtime > self._last_synced_mtime:
+                        self._last_synced_mtime = mtime
+                        items = self.recent_mgr.get_items()
+                        if items and not self.is_busy:
+                            new_meta = items[-1]
+                            cur_id = getattr(self.current_metadata, "image_id", None)
+                            if new_meta.image_id != cur_id:
+                                self._recent_index = len(items) - 1
+                                self._update_history_nav_buttons()
+                                self._update_filmstrip()
+                                self._update_preview_and_attribution(new_meta, staged=True)
+                                self.set_status(f"📱 Remote Sync: Loaded '{new_meta.title or new_meta.image_id}'")
+        except Exception:
+            pass
+        finally:
+            if hasattr(self, "root") and self.root:
+                try:
+                    self.root.after(1500, self._check_external_sync)
+                except Exception:
+                    pass
 
     def on_close(self) -> None:
         if self.parent_frame is not None:

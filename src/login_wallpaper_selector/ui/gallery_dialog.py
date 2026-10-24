@@ -237,10 +237,10 @@ class WallpaperGalleryDialog:
                     "raw": f,
                 })
         else:
-            # History: recent items + history tracker records
+            # History: recent items + history tracker records up to 20
             seen_paths = set()
             recents = self.recent_mgr.get_items()
-            for r in recents:
+            for r in reversed(recents):
                 p = Path(r.local_path)
                 if p.exists() and str(p) not in seen_paths:
                     seen_paths.add(str(p))
@@ -253,23 +253,28 @@ class WallpaperGalleryDialog:
                         "is_fav": self.favorites_mgr.is_favorite(r.image_id),
                         "raw": r,
                     })
+                    if len(items) >= 20:
+                        break
 
             # Also check history records for any downloaded files still in cache
-            hist_records = self.history_tracker.reload()
-            for h in reversed(hist_records):
-                if hasattr(h, "local_path") and h.local_path:
-                    p = Path(h.local_path)
-                    if p.exists() and str(p) not in seen_paths:
-                        seen_paths.add(str(p))
-                        items.append({
-                            "id": h.image_id,
-                            "title": getattr(h, "title", None) or p.stem,
-                            "category": getattr(h, "category", "History"),
-                            "provider": getattr(h, "provider", "Local"),
-                            "path": str(p),
-                            "is_fav": self.favorites_mgr.is_favorite(h.image_id),
-                            "raw": h,
-                        })
+            if len(items) < 20:
+                hist_records = self.history_tracker.reload()
+                for h in reversed(hist_records):
+                    if hasattr(h, "local_path") and h.local_path:
+                        p = Path(h.local_path)
+                        if p.exists() and str(p) not in seen_paths:
+                            seen_paths.add(str(p))
+                            items.append({
+                                "id": h.image_id,
+                                "title": getattr(h, "title", None) or p.stem,
+                                "category": getattr(h, "category", "History"),
+                                "provider": getattr(h, "provider", "Local"),
+                                "path": str(p),
+                                "is_fav": self.favorites_mgr.is_favorite(h.image_id),
+                                "raw": h,
+                            })
+                            if len(items) >= 20:
+                                break
 
         return items
 
@@ -336,8 +341,12 @@ class WallpaperGalleryDialog:
 
         try:
             with Image.open(p) as img:
+                try:
+                    img.draft("RGB", (size[0] * 2, size[1] * 2))
+                except Exception:
+                    pass
                 img_copy = img.copy()
-                img_copy.thumbnail(size, Image.Resampling.LANCZOS)
+                img_copy.thumbnail(size, Image.Resampling.BILINEAR)
                 if HAS_CUSTOMTKINTER:
                     ctk_img = ctk.CTkImage(light_image=img_copy, dark_image=img_copy, size=img_copy.size)
                     self._thumbnail_cache[path_str] = ctk_img
@@ -487,9 +496,13 @@ class WallpaperGalleryDialog:
         # Load larger preview image
         try:
             with Image.open(p) as img:
+                try:
+                    img.draft("RGB", (1400, 840))
+                except Exception:
+                    pass
                 img_copy = img.copy()
                 orig_w, orig_h = img.size
-                img_copy.thumbnail((700, 420), Image.Resampling.LANCZOS)
+                img_copy.thumbnail((700, 420), Image.Resampling.BILINEAR)
                 if HAS_CUSTOMTKINTER:
                     ctk_large = ctk.CTkImage(light_image=img_copy, dark_image=img_copy, size=img_copy.size)
                     img_lbl = ctk.CTkLabel(lb, image=ctk_large, text="")

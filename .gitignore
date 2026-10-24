@@ -22,3 +22,4 @@ wallpapers/**/*.part
 wallpapers/**/*.tmp
 wallpapers/metadata.json
 !wallpapers/**/.gitkeep
+.tv_cache/

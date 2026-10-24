@@ -1,4 +1,4 @@
-"""Manager for tracking and persisting the 5 most recent successfully fetched wallpapers."""
+"""Manager for tracking and persisting the up to 20 most recent successfully fetched wallpapers."""
 
 from __future__ import annotations
 import json
@@ -10,9 +10,9 @@ from .models import WallpaperMetadata
 
 
 class RecentWallpaperManager:
-    """Tracks up to 5 most recently fetched wallpapers with disk persistence and file validation."""
+    """Tracks up to 20 most recently fetched wallpapers with disk persistence and file validation."""
 
-    DEFAULT_CAPACITY = 5
+    DEFAULT_CAPACITY = 20
 
     def __init__(
         self,
@@ -60,6 +60,14 @@ class RecentWallpaperManager:
     def get_items(self) -> List[WallpaperMetadata]:
         """Return all valid recent items whose files still exist on disk."""
         with self._lock:
+            if self.history_file.exists():
+                try:
+                    mtime = self.history_file.stat().st_mtime
+                    if not hasattr(self, "_last_loaded_mtime") or mtime > self._last_loaded_mtime:
+                        self._items = self._load()
+                        self._last_loaded_mtime = mtime
+                except Exception:
+                    pass
             valid = [item for item in self._items if Path(item.local_path).exists()]
             if len(valid) != len(self._items):
                 self._items = valid

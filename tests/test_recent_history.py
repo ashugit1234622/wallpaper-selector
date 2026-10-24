@@ -325,3 +325,55 @@ def test_slide_animation_fallback(monkeypatch, tmp_path: Path):
     assert dialog._last_rendered_pil_img is not None
     assert dialog._is_animating_slide is False
 
+
+def test_recent_manager_default_capacity_20(tmp_path: Path):
+    """Verify RecentWallpaperManager defaults to 20 items capacity."""
+    cfg = AppConfig(custom_cache_dir=str(tmp_path))
+    mgr = RecentWallpaperManager(config=cfg)
+
+    assert mgr.DEFAULT_CAPACITY == 20
+    assert mgr.max_items == 20
+
+    files = [_create_dummy_wallpaper_file(tmp_path, f"cap_{i}.jpg") for i in range(25)]
+    metas = [_create_sample_meta(f"cap_id_{i}", files[i], f"Title {i}") for i in range(25)]
+
+    for m in metas:
+        mgr.add(m)
+
+    items = mgr.get_items()
+    assert len(items) == 20
+    # Oldest 5 (0..4) should have been evicted; items 5..24 remain
+    assert [m.image_id for m in items] == [f"cap_id_{i}" for i in range(5, 25)]
+
+
+def test_filmstrip_caps_at_5_while_archive_has_20(monkeypatch, tmp_path: Path):
+    """Verify the filmstrip below the preview caps at 5 thumbnails even with >5 items in history."""
+    from PIL import Image
+
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: setattr(self, "root", MagicMock()))
+    monkeypatch.setattr(WallpaperSelectorDialog, "_build_widgets", lambda self: None)
+
+    cfg = AppConfig(custom_cache_dir=str(tmp_path))
+    dialog = WallpaperSelectorDialog(config=cfg)
+    dialog.filmstrip_frame = MagicMock()
+
+    # Add 12 items
+    for i in range(12):
+        p = tmp_path / f"pool_{i}.jpg"
+        Image.new("RGB", (100, 60), color="purple").save(p)
+        meta = _create_sample_meta(f"pool_{i}", p, f"Pool {i}")
+        dialog._record_fetched_wallpaper(meta)
+
+    # Archive / history manager holds all 12
+    assert len(dialog.recent_mgr.get_items()) == 12
+
+    # But filmstrip below preview strictly displays 5
+    assert len(dialog.filmstrip_buttons) == 5
+    assert dialog._recent_index == 11
+
+    # Navigate left and ensure filmstrip remains at 5
+    dialog.on_history_prev()
+    assert dialog._recent_index == 10
+    assert len(dialog.filmstrip_buttons) == 5
+
+

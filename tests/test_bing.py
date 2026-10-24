@@ -81,3 +81,40 @@ def test_bing_space_filter(monkeypatch):
     # Desert dunes should be filtered out, AuroraSky kept
     assert len(candidates) == 1
     assert candidates[0].id == "bing_hash2"
+
+
+def test_bing_4k_tv_mode(monkeypatch):
+    provider = BingImageProvider()
+
+    mock_bing_json = {
+        "images": [
+            {
+                "hsh": "hash4k",
+                "urlbase": "/th?id=OHR.MountFuji_EN-US1234",
+                "url": "/th?id=OHR.MountFuji_EN-US1234_1920x1080.jpg",
+                "title": "Mount Fuji Sunrise",
+                "copyright": "Japan Tourism (© Bing)",
+            }
+        ]
+    }
+
+    class MockResponse:
+        def __init__(self, json_data):
+            self.status_code = 200
+            self._json = json_data
+
+        def json(self):
+            return self._json
+
+    monkeypatch.setattr(
+        "httpx.Client.get",
+        lambda self, url, *args, **kwargs: MockResponse(mock_bing_json),
+    )
+
+    candidates = provider.fetch_candidates(WallpaperCategory.NATURE, limit=5, search_for_tv=True)
+    assert len(candidates) == 1
+    cand = candidates[0]
+    assert cand.width == 3840
+    assert cand.height == 2160
+    assert cand.download_url == "https://www.bing.com/th?id=OHR.MountFuji_EN-US1234_UHD.jpg"
+    assert "4K UHD" in cand.title

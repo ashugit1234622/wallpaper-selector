@@ -156,6 +156,7 @@ class CacheManager:
         candidate: WallpaperCandidate,
         temp_download_path: Path,
         mode: str = WallpaperPosition.FILL.value,
+        search_for_tv: bool = False,
     ) -> Optional[WallpaperMetadata]:
         """Validate a downloaded temp file and atomically commit it to cache in native monitor resolution."""
         try:
@@ -169,7 +170,10 @@ class CacheManager:
             sha256_hash = self.compute_sha256(temp_download_path)
             clean_id = "".join(c for c in candidate.id if c.isalnum() or c in ("-", "_"))[:32]
             
-            screen_w, screen_h = get_native_screen_resolution()
+            if search_for_tv or getattr(self.config, "search_for_tv", False):
+                screen_w, screen_h = 3840, 2160
+            else:
+                screen_w, screen_h = get_native_screen_resolution()
             category_dir = self.get_category_dir(candidate.category)
             final_path = category_dir / f"{clean_id}_{sha256_hash[:8]}.jpg"
 

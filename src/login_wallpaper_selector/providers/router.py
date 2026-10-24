@@ -1,11 +1,13 @@
 """Provider router orchestrating searches, fallbacks, and atomic image downloading."""
 
-from __future__ import annotations
+import logging
 import random
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Callable
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseImageProvider
 from .nasa import NasaImageProvider
@@ -125,6 +127,7 @@ class ProviderRouter:
         color: Optional[ColorPalette] = None,
         mood: Optional[WallpaperMood] = None,
         keyword: Optional[str] = None,
+        search_for_tv: bool = False,
     ) -> List[BaseImageProvider]:
         """Ordered list of providers (primary followed by secondary and fallbacks)."""
         if category == WallpaperCategory.SPACE:
@@ -149,6 +152,12 @@ class ProviderRouter:
         elif (mood == WallpaperMood.DARK or color == ColorPalette.MONOCHROME) and self.bing in providers:
             providers = [p for p in providers if p != self.bing] + [self.bing]
 
+        if search_for_tv:
+            # 4K TV mode requires high-resolution 16:9 imagery. Wallhaven & Bing natively support 4K.
+            preferred = [p for p in [self.wallhaven, self.bing] if p in providers]
+            others = [p for p in providers if p not in preferred]
+            providers = preferred + others
+
         return providers
 
     def fetch_candidates(
@@ -162,20 +171,35 @@ class ProviderRouter:
         query: Optional[str] = None,
         tried_sources: Optional[Dict[str, Any]] = None,
         keyword: Optional[str] = None,
+        search_for_tv: Optional[bool] = None,
     ) -> List[WallpaperCandidate]:
         """Fetch candidate images for a category, interleaving results across available providers."""
+        if search_for_tv is None:
+            search_for_tv = getattr(self.config, "search_for_tv", False)
+
         try:
-            providers = self.get_providers_for_category(category, color=color, mood=mood, keyword=keyword)
+            providers = self.get_providers_for_category(
+                category, color=color, mood=mood, keyword=keyword, search_for_tv=bool(search_for_tv)
+            )
         except TypeError:
             try:
-                providers = self.get_providers_for_category(category, color=color, mood=mood)
+                providers = self.get_providers_for_category(category, color=color, mood=mood, keyword=keyword)
             except TypeError:
-                providers = self.get_providers_for_category(category)
+                try:
+                    providers = self.get_providers_for_category(category, color=color, mood=mood)
+                except TypeError:
+                    providers = self.get_providers_for_category(category)
         if not providers:
             return []
 
         active_season = season or (get_current_season() if getattr(self.config, "seasonal_theme_enabled", False) else None)
         effective_query = query
+        if search_for_tv:
+            if effective_query:
+                if not any(k in effective_query.lower() for k in ["16:9", "16x9", "4k", "widescreen", "landscape"]):
+                    effective_query = f"{effective_query} landscape 4k 16:9"
+            else:
+                effective_query = "landscape 4k 16:9 wallpaper"
         if not effective_query and active_season:
             effective_query = augment_query_with_season("", active_season, category)
 
@@ -209,15 +233,27 @@ class ProviderRouter:
 
         for provider in search_providers:
             try:
-                candidates = provider.fetch_candidates(
-                    category=category,
-                    query=effective_query,
-                    limit=target_per_provider,
-                    exclude_ids=exclude_ids,
-                    color=color,
-                    custom_color_hex=custom_color_hex,
-                    mood=mood,
-                )
+                try:
+                    candidates = provider.fetch_candidates(
+                        category=category,
+                        query=effective_query,
+                        limit=target_per_provider,
+                        exclude_ids=exclude_ids,
+                        color=color,
+                        custom_color_hex=custom_color_hex,
+                        mood=mood,
+                        search_for_tv=search_for_tv,
+                    )
+                except TypeError:
+                    candidates = provider.fetch_candidates(
+                        category=category,
+                        query=effective_query,
+                        limit=target_per_provider,
+                        exclude_ids=exclude_ids,
+                        color=color,
+                        custom_color_hex=custom_color_hex,
+                        mood=mood,
+                    )
                 if candidates:
                     provider_candidates.append(list(candidates))
             except Exception as e:
@@ -241,14 +277,25 @@ class ProviderRouter:
                 if tried_sources is not None and tried_sources.get(provider.name, {}).get("throttled"):
                     continue
                 try:
-                    candidates = provider.fetch_candidates(
-                        category=category,
-                        limit=limit,
-                        exclude_ids=set(),
-                        color=color,
-                        custom_color_hex=custom_color_hex,
-                        mood=mood,
-                    )
+                    try:
+                        candidates = provider.fetch_candidates(
+                            category=category,
+                            limit=limit,
+                            exclude_ids=set(),
+                            color=color,
+                            custom_color_hex=custom_color_hex,
+                            mood=mood,
+                            search_for_tv=search_for_tv,
+                        )
+                    except TypeError:
+                        candidates = provider.fetch_candidates(
+                            category=category,
+                            limit=limit,
+                            exclude_ids=set(),
+                            color=color,
+                            custom_color_hex=custom_color_hex,
+                            mood=mood,
+                        )
                     if candidates:
                         all_candidates.extend(candidates)
                         if len(all_candidates) >= limit:
@@ -256,19 +303,34 @@ class ProviderRouter:
                 except Exception:
                     continue
 
+        if search_for_tv:
+            # In 4K TV mode, reject any candidate whose known resolution is under 3840x2160
+            all_candidates = [
+                c for c in all_candidates
+                if (c.width is None or c.width >= 3840) and (c.height is None or c.height >= 2160)
+            ]
+            # Prioritize candidates with verified 4K UHD dimensions
+            all_candidates.sort(key=lambda c: 0 if (c.width and c.width >= 3840 and c.height and c.height >= 2160) else 1)
+
         return all_candidates
 
     def download_candidate(
         self,
         candidate: WallpaperCandidate,
         progress_callback: Optional[callable] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[Path]:
         """Download candidate image streaming to a temporary .part file with verification."""
         temp_file = self.cache.cache_dir / f"download_{int(time.time()*1000)}.part"
         headers = {"User-Agent": self.USER_AGENT}
 
         try:
-            with httpx.Client(timeout=self.config.request_timeout_seconds * 2, headers=headers, follow_redirects=True) as client:
+            with httpx.Client(
+                timeout=self.config.request_timeout_seconds * 2,
+                headers=headers,
+                follow_redirects=True,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            ) as client:
                 with client.stream("GET", candidate.download_url) as response:
                     if response.status_code != 200:
                         return None
@@ -278,6 +340,14 @@ class ProviderRouter:
 
                     with open(temp_file, "wb") as f:
                         for chunk in response.iter_bytes(chunk_size=65536):
+                            if cancel_check and cancel_check():
+                                try:
+                                    f.close()
+                                    if temp_file.exists():
+                                        temp_file.unlink()
+                                except Exception:
+                                    pass
+                                return None
                             if chunk:
                                 f.write(chunk)
                                 downloaded += len(chunk)
@@ -305,6 +375,8 @@ class ProviderRouter:
         mood: Optional[WallpaperMood] = None,
         season: Optional[Season] = None,
         keyword: Optional[str] = None,
+        search_for_tv: Optional[bool] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
         """Fetch, download, validate, cache, and record a wallpaper with retries.
         
@@ -315,6 +387,8 @@ class ProviderRouter:
             Tuple of (WallpaperMetadata, error_message)
         """
         total_attempts = max_retries if max_retries is not None else getattr(self.config, "max_fetch_retries", 5)
+        if search_for_tv is None:
+            search_for_tv = getattr(self.config, "search_for_tv", False)
         accumulated_excludes = set(self.history.get_recent_ids())
         active_season = season or (get_current_season() if getattr(self.config, "seasonal_theme_enabled", False) else None)
         tried_sources: Dict[str, Any] = {}
@@ -329,6 +403,8 @@ class ProviderRouter:
         total_requests = 0
 
         for attempt in range(1, total_attempts + 1):
+            if cancel_check and cancel_check():
+                return None, "Operation cancelled by user."
             if time.time() - start_time > GLOBAL_TIMEOUT_SECONDS:
                 break
             if total_requests >= MAX_GLOBAL_REQUESTS:
@@ -414,9 +490,13 @@ class ProviderRouter:
                     query=tier_query,
                     tried_sources=tried_sources,
                     keyword=clean_kw if is_keyword_search else None,
+                    search_for_tv=search_for_tv,
                 )
             except TypeError:
-                candidates = self.fetch_candidates(category, limit=6)
+                try:
+                    candidates = self.fetch_candidates(category, limit=6, search_for_tv=search_for_tv)
+                except TypeError:
+                    candidates = self.fetch_candidates(category, limit=6)
             total_requests += 1
 
             # Filter out any candidates that already failed in previous attempts
@@ -439,10 +519,41 @@ class ProviderRouter:
 
             if valid_candidates:
                 for candidate in valid_candidates:
-                    temp_path = self.download_candidate(candidate, progress_callback)
+                    if cancel_check and cancel_check():
+                        return None, "Operation cancelled by user."
+                    try:
+                        temp_path = self.download_candidate(candidate, progress_callback, cancel_check=cancel_check)
+                    except TypeError:
+                        temp_path = self.download_candidate(candidate, progress_callback)
                     if not temp_path:
                         accumulated_excludes.add(candidate.id)
                         continue
+
+                    # ── Post-download 4K TV resolution check ──────────────
+                    if search_for_tv:
+                        try:
+                            from PIL import Image
+                            with Image.open(temp_path) as chk_img:
+                                chk_w, chk_h = chk_img.size
+                            if chk_w < 3840 or chk_h < 2160:
+                                logger.info(
+                                    "Candidate %s resolution %dx%d is below 4K (3840x2160) in TV mode; skipping.",
+                                    candidate.id, chk_w, chk_h
+                                )
+                                accumulated_excludes.add(candidate.id)
+                                try:
+                                    temp_path.unlink()
+                                except Exception:
+                                    pass
+                                if status_callback:
+                                    status_callback(
+                                        f"Skipping non-4K image ({chk_w}x{chk_h} < 3840x2160)...",
+                                        attempt,
+                                        total_attempts,
+                                    )
+                                continue
+                        except Exception as e:
+                            logger.warning("Resolution check failed for %s: %s", temp_path, e)
 
                     # ── Post-download adaptive validation ─────────────────
                     img_stats = compute_image_stats_from_file(temp_path)
@@ -499,11 +610,19 @@ class ProviderRouter:
                     dom_rgb = extract_dominant_color_from_file(temp_path)
                     candidate.dominant_color_hex = rgb_to_hex(*dom_rgb)
 
-                    metadata = self.cache.atomic_save_download(
-                        candidate=candidate,
-                        temp_download_path=temp_path,
-                        mode=mode,
-                    )
+                    try:
+                        metadata = self.cache.atomic_save_download(
+                            candidate=candidate,
+                            temp_download_path=temp_path,
+                            mode=mode,
+                            search_for_tv=bool(search_for_tv),
+                        )
+                    except TypeError:
+                        metadata = self.cache.atomic_save_download(
+                            candidate=candidate,
+                            temp_download_path=temp_path,
+                            mode=mode,
+                        )
 
                     if metadata:
                         metadata.dominant_color_hex = candidate.dominant_color_hex

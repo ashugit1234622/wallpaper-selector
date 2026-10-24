@@ -78,3 +78,52 @@ def test_wallhaven_provider_exclusion(monkeypatch):
         exclude_ids={"wallhaven_excluded_item"},
     )
     assert len(candidates) == 0
+
+
+def test_wallhaven_4k_tv_mode(monkeypatch):
+    provider = WallhavenProvider()
+
+    captured_params = {}
+
+    mock_wallhaven_json = {
+        "data": [
+            {
+                "id": "item_1080p",
+                "path": "https://w.wallhaven.cc/full/10/wallhaven-1080p.jpg",
+                "resolution": "1920x1080",
+                "dimension_x": 1920,
+                "dimension_y": 1080,
+            },
+            {
+                "id": "item_4k",
+                "path": "https://w.wallhaven.cc/full/4k/wallhaven-4k.jpg",
+                "resolution": "3840x2160",
+                "dimension_x": 3840,
+                "dimension_y": 2160,
+            },
+        ]
+    }
+
+    class MockResponse:
+        def __init__(self, json_data):
+            self.status_code = 200
+            self._json = json_data
+
+        def json(self):
+            return self._json
+
+    def mock_get(self, url, *args, **kwargs):
+        captured_params.update(kwargs.get("params", {}))
+        return MockResponse(mock_wallhaven_json)
+
+    monkeypatch.setattr("httpx.Client.get", mock_get)
+
+    candidates = provider.fetch_candidates(WallpaperCategory.NATURE, limit=5, search_for_tv=True)
+    assert captured_params.get("atleast") == "3840x2160"
+    assert captured_params.get("ratios") == "16x9"
+
+    # Only 4K item should be accepted; 1080p item must be excluded
+    assert len(candidates) == 1
+    assert candidates[0].id == "wallhaven_item_4k"
+    assert candidates[0].width == 3840
+    assert candidates[0].height == 2160

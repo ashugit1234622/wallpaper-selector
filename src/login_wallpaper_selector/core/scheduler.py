@@ -111,6 +111,7 @@ class WallpaperRotationDaemon:
         color: Optional[ColorPalette] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
         status_callback: Optional[Callable[[str, int, int], None]] = None,
+        search_for_tv: Optional[bool] = False,
     ) -> Tuple[Optional[WallpaperMetadata], Optional[str]]:
         """Fetch and apply a fresh wallpaper adhering to rotation preferences.
         
@@ -149,6 +150,7 @@ class WallpaperRotationDaemon:
                 mode=mode,
                 progress_callback=progress_callback,
                 status_callback=status_callback,
+                search_for_tv=search_for_tv,
             )
             time_kw = primary_kw
 
@@ -162,6 +164,7 @@ class WallpaperRotationDaemon:
                     mode=mode,
                     progress_callback=progress_callback,
                     status_callback=status_callback,
+                    search_for_tv=search_for_tv,
                 )
                 time_kw = fallback_kw
 
@@ -175,6 +178,7 @@ class WallpaperRotationDaemon:
                     status_callback=status_callback,
                     color=color,
                     mood=mood,
+                    search_for_tv=search_for_tv,
                 )
         else:
             # Explicit category rotation
@@ -185,6 +189,7 @@ class WallpaperRotationDaemon:
                 status_callback=status_callback,
                 color=color,
                 mood=mood,
+                search_for_tv=search_for_tv,
             )
 
         if not meta:

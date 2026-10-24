@@ -98,7 +98,7 @@ def test_dialog_hotkey_debouncing(monkeypatch):
         dialog.on_hotkey_triggered()
         assert dialog._is_hotkey_rotating is True
         mock_toast.assert_called_once()
-        assert "Fetching new wallpaper" in mock_toast.call_args[0][1]
+        assert "Fetching new desktop wallpaper" in mock_toast.call_args[0][1]
 
 
 def test_dialog_hotkey_toggle_and_combo(monkeypatch):
@@ -129,3 +129,107 @@ def test_dialog_hotkey_toggle_and_combo(monkeypatch):
         dialog.on_hotkey_combo_change("Win+Shift+W")
         assert config.global_hotkey_combo == "Win+Shift+W"
         mock_start.assert_called_once()
+
+
+def test_hotkey_fallback_when_combo_taken():
+    """Verify listener automatically falls back to a non-conflicting combination if initial registration fails."""
+    listener = GlobalHotkeyListener(combo="Win+Alt+W")
+
+    def mock_register(hwnd, id, mod, vk):
+        # Fail Win+Alt+W (0x0008 | 0x0001) but succeed Ctrl+Alt+W (0x0002 | 0x0001)
+        if (mod & MOD_WIN) != 0:
+            return 0
+        return 1
+
+    with patch("os.name", "nt"), \
+         patch("ctypes.windll.user32.RegisterHotKey", side_effect=mock_register), \
+         patch("ctypes.windll.user32.UnregisterHotKey", return_value=1), \
+         patch("ctypes.windll.user32.PeekMessageW", return_value=0), \
+         patch("time.sleep"):
+        success = listener.start()
+        assert success is True
+        assert listener.is_fallback is True
+        assert listener.active_combo == "Ctrl+Alt+W"
+        listener.stop()
+
+
+def test_on_hotkey_triggered_enforces_desktop_resolution(monkeypatch):
+    """Verify on_hotkey_triggered calls daemon.rotate_now with search_for_tv=False (desktop resolution)."""
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: setattr(self, "root", MagicMock()))
+    monkeypatch.setattr(WallpaperSelectorDialog, "_build_widgets", lambda self: None)
+    config = AppConfig(rotation_enabled=True, rotation_interval_minutes=30)
+    config.search_for_tv = True  # TV toggle is ON
+    dialog = WallpaperSelectorDialog(config=config)
+    dialog.staged_metadata = None
+    dialog.current_metadata = MagicMock(image_id="curr_1")
+    dialog._schedule_next_rotation_check = MagicMock()
+    dialog._record_fetched_wallpaper = MagicMock()
+    dialog._update_preview_and_attribution = MagicMock()
+    dialog.set_status = MagicMock()
+
+    mock_daemon = MagicMock()
+    mock_meta = MagicMock(title="Desktop Mountain", category="Nature", time_of_day_info=None)
+    mock_daemon.rotate_now.return_value = (mock_meta, None)
+
+    def sync_thread(target, *args, **kwargs):
+        m = MagicMock()
+        m.start.side_effect = target
+        return m
+
+    with patch("login_wallpaper_selector.core.scheduler.WallpaperRotationDaemon", return_value=mock_daemon), \
+         patch("threading.Thread", side_effect=sync_thread), \
+         patch("login_wallpaper_selector.ui.dialog.send_toast_notification"):
+        dialog.on_hotkey_triggered()
+
+    # Verify search_for_tv=False was explicitly passed despite config.search_for_tv being True
+    mock_daemon.rotate_now.assert_called_once()
+    kwargs = mock_daemon.rotate_now.call_args[1]
+    assert kwargs.get("search_for_tv") is False
+
+    # Execute UI update callback
+    ui_callback = dialog.root.after.call_args[0][1]
+    ui_callback()
+
+    # Verify preview was updated since there was no staged unapplied preview
+    assert dialog.current_metadata == mock_meta
+    # Verify auto-rotate timer was reset starting from now (30m * 60 * 1000 = 1800000ms)
+    dialog._schedule_next_rotation_check.assert_called_once_with(delay_ms=1800000)
+
+
+def test_on_hotkey_triggered_preserves_staged_preview(monkeypatch):
+    """Verify on_hotkey_triggered does not overwrite user's active manual staged preview."""
+    monkeypatch.setattr(WallpaperSelectorDialog, "_init_window", lambda self: setattr(self, "root", MagicMock()))
+    monkeypatch.setattr(WallpaperSelectorDialog, "_build_widgets", lambda self: None)
+    config = AppConfig()
+    dialog = WallpaperSelectorDialog(config=config)
+    staged = MagicMock(image_id="staged_preview")
+    current = MagicMock(image_id="curr_active")
+    dialog.staged_metadata = staged
+    dialog.current_metadata = current
+    dialog._schedule_next_rotation_check = MagicMock()
+    dialog._record_fetched_wallpaper = MagicMock()
+    dialog._update_preview_and_attribution = MagicMock()
+    dialog.set_status = MagicMock()
+
+    mock_daemon = MagicMock()
+    mock_meta = MagicMock(title="Background Space", category="Space", time_of_day_info=None)
+    mock_daemon.rotate_now.return_value = (mock_meta, None)
+
+    def sync_thread(target, *args, **kwargs):
+        m = MagicMock()
+        m.start.side_effect = target
+        return m
+
+    with patch("login_wallpaper_selector.core.scheduler.WallpaperRotationDaemon", return_value=mock_daemon), \
+         patch("threading.Thread", side_effect=sync_thread), \
+         patch("login_wallpaper_selector.ui.dialog.send_toast_notification"):
+        dialog.on_hotkey_triggered()
+
+    ui_callback = dialog.root.after.call_args[0][1]
+    ui_callback()
+
+    # Staged preview preserved, current_metadata NOT changed to mock_meta
+    assert dialog.current_metadata == current
+    status_str = dialog.set_status.call_args[0][0]
+    assert "Active manual preview preserved" in status_str
+
