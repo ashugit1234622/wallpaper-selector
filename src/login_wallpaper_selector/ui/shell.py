@@ -16,6 +16,7 @@ except ImportError:
 import tkinter as tk
 from tkinter import messagebox
 
+from .. import __version__
 from ..core.config import AppConfig
 from ..core.updater import check_for_updates, UpdateCheckResult
 from .dialog import WallpaperSelectorDialog
@@ -124,12 +125,12 @@ class AppShell:
             ).pack(anchor="w")
             ctk.CTkLabel(
                 brand_frame,
-                text="v1.5.0",
+                text=f"v{__version__}",
                 font=ctk.CTkFont(family=_W11["font"], size=11),
                 text_color=_W11["text_ter"],
             ).pack(anchor="w", pady=(1, 0))
         else:
-            tk.Label(brand_frame, text="Desktop Suite", font=("Segoe UI", 12, "bold"), bg="#1c1c1c", fg="#f3f3f3").pack(anchor="w")
+            tk.Label(brand_frame, text=f"Desktop Suite v{__version__}", font=("Segoe UI", 12, "bold"), bg="#1c1c1c", fg="#f3f3f3").pack(anchor="w")
 
         # Separator line
         if HAS_CUSTOMTKINTER:

@@ -300,26 +300,39 @@ def apply_update(
             )
 
             _notify("Pulling latest code...", 0.45)
-            # Pull active branch or master
+            # Pull with autostash to prevent uncommitted modifications from blocking update
             pull_res = subprocess.run(
-                ["git", "pull", "origin", "master"],
+                ["git", "pull", "--autostash", "origin", "master"],
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
-                timeout=30.0,
+                timeout=35.0,
             )
             if pull_res.returncode != 0:
-                # Try pulling current branch
-                subprocess.run(
-                    ["git", "pull"],
+                # Try pulling active branch
+                pull_res = subprocess.run(
+                    ["git", "pull", "--autostash"],
                     cwd=project_dir,
                     capture_output=True,
                     text=True,
-                    timeout=30.0,
+                    timeout=35.0,
                 )
 
+            if pull_res.returncode != 0:
+                # Clean recovery: fast-forward to origin/master
+                reset_res = subprocess.run(
+                    ["git", "reset", "--hard", "origin/master"],
+                    cwd=project_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=20.0,
+                )
+                if reset_res.returncode != 0:
+                    raw_err = pull_res.stderr or pull_res.stdout or "git pull failed"
+                    return False, f"Git pull failed: {raw_err.strip()[:80]}"
+
             _notify("Installing updated packages and dependencies...", 0.70)
-            pip_cmd = [sys.executable, "-m", "pip", "install", "-e", "."]
+            pip_cmd = [sys.executable, "-m", "pip", "install", "-e", ".", "--no-input"]
             pip_res = subprocess.run(
                 pip_cmd,
                 cwd=project_dir,
