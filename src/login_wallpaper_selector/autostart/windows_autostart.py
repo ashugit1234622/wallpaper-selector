@@ -1,7 +1,10 @@
 """Windows HKCU Run autostart adapter."""
 
 from __future__ import annotations
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None
 from typing import Optional
 from .base import BaseAutostartAdapter
 

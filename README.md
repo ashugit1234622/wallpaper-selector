@@ -37,7 +37,32 @@ powershell -ExecutionPolicy Bypass -File .\build_installer.ps1
 
 ---
 
-### Option 2: Windows 1-Click PowerShell (From Source)
+### Option 2: Linux Standalone AppImage (Single-File Binary & Installer — No Python Required)
+
+1. Download **`Desktop-Utility-Suite-v2.0.0-x86_64.AppImage`** from [GitHub Releases](https://github.com/ashugit1234622/wallpaper-selector/releases).
+2. Make it executable:
+   ```bash
+   chmod +x Desktop-Utility-Suite-v2.0.0-x86_64.AppImage
+   ```
+3. **Install into Linux Desktop & System PATH:**
+   ```bash
+   ./Desktop-Utility-Suite-v2.0.0-x86_64.AppImage --install
+   ```
+   *Creates an Application Menu entry, high-res desktop icon, and registers `login-wallpaper-selector` in your terminal PATH.*
+
+*To run portably without installing, just execute or double-click:*
+```bash
+./Desktop-Utility-Suite-v2.0.0-x86_64.AppImage
+```
+
+*To build the AppImage locally:*
+```bash
+chmod +x build_appimage.sh && ./build_appimage.sh
+```
+
+---
+
+### Option 3: Windows 1-Click PowerShell (From Source)
 
 Open **PowerShell** (no Administrator privileges required) and run:
 
@@ -56,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ---
 
-### Option 3: Linux & macOS (Native Bash)
+### Option 4: Linux & macOS (From Source)
 
 Open terminal and run:
 
@@ -71,7 +96,7 @@ Sets up the package, places a command-line launcher in `~/.local/bin/login-wallp
 
 ---
 
-### Option 4: Python Pip / Developers
+### Option 5: Python Pip / Developers
 
 ```bash
 git clone https://github.com/ashugit1234622/wallpaper-selector.git

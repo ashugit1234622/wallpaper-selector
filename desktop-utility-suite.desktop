@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop Utility Suite
+GenericName=Wallpaper & Download Manager
+Comment=Intelligent 4K Wallpaper Selector and Download Folder Organizer
+Exec=desktop-utility-suite %U
+Icon=desktop-utility-suite
+Terminal=false
+Categories=Utility;Settings;DesktopSettings;
+StartupNotify=true
+MimeType=image/jpeg;image/png;
+Keywords=wallpaper;background;download;organizer;clean;tv;4k;uhd;

@@ -4,7 +4,10 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
-import winreg
+try:
+    import winreg
+except ImportError:
+    winreg = None
 from pathlib import Path
 from typing import Optional
 from .base import BaseWallpaperAdapter

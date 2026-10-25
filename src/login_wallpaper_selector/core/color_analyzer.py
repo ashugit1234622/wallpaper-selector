@@ -5,7 +5,6 @@ import colorsys
 from pathlib import Path
 from typing import Tuple, List, Optional, NamedTuple
 from PIL import Image
-import numpy as np
 
 from .models import ColorPalette, WallpaperMood
 

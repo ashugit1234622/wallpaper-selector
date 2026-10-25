@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -e
+
+# Resolve paths
+HERE="$(dirname "$(readlink -f "${0}")")"
+BIN_DIR="${HERE}/usr/bin"
+APP_EXEC="${BIN_DIR}/desktop-utility-suite"
+ICON_SRC="${HERE}/desktop-utility-suite.png"
+DESKTOP_SRC="${HERE}/desktop-utility-suite.desktop"
+
+TARGET_DIR="${HOME}/.local/bin"
+APP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+TARGET_APPIMAGE="${TARGET_DIR}/desktop-utility-suite.AppImage"
+TARGET_DESKTOP="${APP_DIR}/desktop-utility-suite.desktop"
+TARGET_ICON="${ICON_DIR}/desktop-utility-suite.png"
+TARGET_SYMLINK="${TARGET_DIR}/login-wallpaper-selector"
+
+do_install() {
+    echo ""
+    echo "========================================================"
+    echo "  Installing Desktop Utility Suite v2.0.0 on Linux"
+    echo "========================================================"
+
+    mkdir -p "${TARGET_DIR}" "${APP_DIR}" "${ICON_DIR}"
+
+    CURRENT_IMAGE="${APPIMAGE:-}"
+    if [ -z "${CURRENT_IMAGE}" ] || [ ! -f "${CURRENT_IMAGE}" ]; then
+        CURRENT_IMAGE="$(readlink -f "$0")"
+    fi
+
+    if [ -f "${CURRENT_IMAGE}" ] && [ "$(readlink -f "${CURRENT_IMAGE}")" != "$(readlink -f "${TARGET_APPIMAGE}")" ]; then
+        echo " [*] Copying binary to: ${TARGET_APPIMAGE}"
+        cp -f "${CURRENT_IMAGE}" "${TARGET_APPIMAGE}"
+        chmod +x "${TARGET_APPIMAGE}"
+    else
+        chmod +x "${TARGET_APPIMAGE}" 2>/dev/null || true
+    fi
+
+    # Create convenient terminal shortcut
+    ln -sf "${TARGET_APPIMAGE}" "${TARGET_SYMLINK}"
+    chmod +x "${TARGET_SYMLINK}"
+    echo " [*] Created CLI symlink: ${TARGET_SYMLINK}"
+
+    # Install icon
+    if [ -f "${ICON_SRC}" ]; then
+        cp -f "${ICON_SRC}" "${TARGET_ICON}"
+        echo " [*] Installed application icon: ${TARGET_ICON}"
+    fi
+
+    # Create desktop menu entry
+    cat << EOF > "${TARGET_DESKTOP}"
+[Desktop Entry]
+Type=Application
+Name=Desktop Utility Suite
+GenericName=Wallpaper & Download Manager
+Comment=Intelligent 4K Wallpaper Selector and Download Folder Organizer
+Exec=${TARGET_APPIMAGE} %U
+Icon=desktop-utility-suite
+Terminal=false
+Categories=Utility;Settings;DesktopSettings;
+StartupNotify=true
+MimeType=image/jpeg;image/png;
+Keywords=wallpaper;background;download;organizer;clean;tv;4k;uhd;
+EOF
+    chmod +x "${TARGET_DESKTOP}"
+    echo " [*] Created desktop launcher: ${TARGET_DESKTOP}"
+
+    # Update system desktop / icon databases
+    update-desktop-database "${APP_DIR}" 2>/dev/null || true
+    gtk-update-icon-cache -f "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+
+    echo ""
+    echo "========================================================"
+    echo " [✓] Installation complete!"
+    echo " You can now launch Desktop Utility Suite from your"
+    echo " Application Menu or run 'login-wallpaper-selector'!"
+    echo "========================================================"
+    echo ""
+
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -i desktop-utility-suite "Desktop Utility Suite" "Installed successfully to application menu!" 2>/dev/null || true
+    fi
+}
+
+do_uninstall() {
+    echo ""
+    echo "========================================================"
+    echo "  Uninstalling Desktop Utility Suite"
+    echo "========================================================"
+
+    rm -f "${TARGET_APPIMAGE}"
+    rm -f "${TARGET_SYMLINK}"
+    rm -f "${TARGET_DESKTOP}"
+    rm -f "${TARGET_ICON}"
+
+    update-desktop-database "${APP_DIR}" 2>/dev/null || true
+    gtk-update-icon-cache -f "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+
+    echo " [✓] Desktop shortcuts, icons, and binaries cleanly removed."
+    echo ""
+}
+
+# 1. Handle special installer CLI arguments
+if [ "$1" = "--install" ] || [ "$1" = "-i" ]; then
+    do_install
+    exit 0
+fi
+
+if [ "$1" = "--uninstall" ]; then
+    do_uninstall
+    exit 0
+fi
+
+# 2. Configure runtime environment for bundled libraries
+export PATH="${BIN_DIR}:${PATH}"
+export LD_LIBRARY_PATH="${BIN_DIR}/_internal:${BIN_DIR}:${LD_LIBRARY_PATH}"
+
+# 3. Launch compiled application
+exec "${APP_EXEC}" "$@"
