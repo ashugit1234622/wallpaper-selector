@@ -65,6 +65,18 @@ def run_check() -> int:
             if prov != router.artic:  # Artic is an optional fallback
                 all_ok = False
 
+    # 5. Check CleanMy-TV & Android TV Connectivity
+    try:
+        from .core.tv_bridge import TvBridge
+        tv = TvBridge(cleanmytv_dir=getattr(config, "cleanmytv_dir", None), host=getattr(config, "tv_host", None))
+        tv_ok, tv_msg = tv.test_connection()
+        if tv_ok:
+            print(f"[*] CleanMy-TV Bridge: Reachable ({tv_msg})")
+        else:
+            print(f"[*] CleanMy-TV Bridge: Not connected ({tv_msg})")
+    except Exception as e:
+        print(f"[*] CleanMy-TV Bridge check error: {e}")
+
     print("\nHealth check complete.")
     return 0 if all_ok else 1
 
@@ -184,6 +196,7 @@ def set_category_headless(
     mood_str: Optional[str] = None,
     layout_aware: Optional[bool] = None,
     keyword_str: Optional[str] = None,
+    apply_to_tv: bool = False,
 ) -> int:
     """Directly fetch and apply a category wallpaper headlessly."""
     category = None
@@ -252,9 +265,41 @@ def set_category_headless(
         print(f"✓ Successfully applied '{meta.title}' ({meta.creator}){lock_msg}{mood_info}{color_info}")
         print(f"  License: {meta.license}")
         print(f"  Saved to: {meta.local_path}")
+
+        if apply_to_tv:
+            try:
+                from .core.tv_bridge import TvBridge
+                tv = TvBridge(cleanmytv_dir=getattr(config, "cleanmytv_dir", None), host=getattr(config, "tv_host", None))
+                print(f"[*] Pushing 4K wallpaper to Android TV at {tv.host} via CleanMyTV...")
+                tv_ok, tv_msg = tv.apply_wallpaper(Path(meta.local_path), crop_16_9=True, on_progress=lambda p, m: print(f"    [{int(p*100)}%] {m}"))
+                if tv_ok:
+                    print(f"✓ {tv_msg}")
+                else:
+                    print(f"⚠ TV Sync failed: {tv_msg}")
+            except Exception as e:
+                print(f"⚠ TV Sync error: {e}")
+
         return 0
     else:
         print("Failed to apply wallpaper via desktop adapter.")
+        return 1
+
+
+def run_test_tv() -> int:
+    """Test connection to Android TV via CleanMy-TV bridge."""
+    config = AppConfig.load()
+    from .core.tv_bridge import TvBridge
+    tv = TvBridge(cleanmytv_dir=getattr(config, "cleanmytv_dir", None), host=getattr(config, "tv_host", None))
+    print("=== CleanMy-TV Bridge Test ===")
+    print(f"Target TV Host: {tv.host}")
+    print(f"CleanMyTV Dir : {tv.cleanmytv_dir}")
+    print("[*] Testing ADB connectivity to Android TV...")
+    ok, msg = tv.test_connection()
+    if ok:
+        print(f"✓ {msg}")
+        return 0
+    else:
+        print(f"✗ Connection failed: {msg}")
         return 1
 
 
@@ -382,6 +427,8 @@ def main() -> None:
     parser.add_argument("--interval", type=str, help="Set rotation interval (e.g. 30m, 1h, 3h, daily)")
     parser.add_argument("--check-update", action="store_true", help="Check GitHub for available software updates")
     parser.add_argument("--update", action="store_true", help="Download and install the latest available software update")
+    parser.add_argument("--tv", action="store_true", help="Apply wallpaper to Android TV (via CleanMyTV)")
+    parser.add_argument("--test-tv", action="store_true", help="Test ADB connection to Android TV via CleanMyTV")
 
     args = parser.parse_args()
 
@@ -398,6 +445,10 @@ def main() -> None:
     elif args.status:
         run_status()
         sys.exit(0)
+    elif args.test_tv:
+        sys.exit(run_test_tv())
+    elif args.tv and not (args.set_category or args.keyword):
+        sys.exit(run_test_tv())
     elif args.install:
         sys.exit(register_autostart())
     elif args.uninstall:
@@ -414,7 +465,7 @@ def main() -> None:
         sys.exit(run_update())
     elif args.set_category or args.keyword:
         cat_to_use = args.set_category or "Space"
-        sys.exit(set_category_headless(cat_to_use, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware, keyword_str=args.keyword))
+        sys.exit(set_category_headless(cat_to_use, args.mode, args.set_lockscreen, args.color, args.mood, args.layout_aware, keyword_str=args.keyword, apply_to_tv=args.tv))
     else:
         # Default action: launch GUI dialog
         initial = "organizer" if args.organizer else "wallpaper"
