@@ -15,7 +15,11 @@ if ! command -v python3 &> /dev/null; then
 fi
 
 echo "[1/4] Installing package in user environment..."
-python3 -m pip install --user -e "$SCRIPT_DIR"
+PIP_ARGS="--user"
+if python3 -m pip install --help 2>&1 | grep -q -- '--break-system-packages'; then
+    PIP_ARGS="--user --break-system-packages"
+fi
+python3 -m pip install $PIP_ARGS -e "$SCRIPT_DIR"
 
 # 2. Setup CLI launcher in ~/.local/bin
 echo "[2/4] Setting up CLI launcher..."
